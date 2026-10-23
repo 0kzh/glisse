@@ -209,8 +209,10 @@ struct WebView: UIViewRepresentable {
       webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
     if CommandLine.arguments.contains("-webcontrols") {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-        webView.evaluateJavaScript("window.scrollTo(0, 842)", completionHandler: nil)
+      for i in 1...6 {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.7) {
+          webView.evaluateJavaScript("window.scrollTo(0, 842)", completionHandler: nil)
+        }
       }
     }
     return webView
