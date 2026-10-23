@@ -1,0 +1,24 @@
+name: GlassRef
+options:
+  bundleIdPrefix: ca.kelvinzhang.parity
+targets:
+  GlassRef:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Sources
+      - path: Resources
+        buildPhase: resources
+      - path: Web
+        buildPhase: resources
+        type: folder
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ca.kelvinzhang.parity.GlassRef
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        SWIFT_VERSION: "5.0"
