@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import { Button, SearchField, TabBar } from "../../../src/index";
+import { Button, Menu, SearchField, Slider, Switch, TabBar } from "../../../src/index";
 
 const sharePath =
   "M216,112v96a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V112A16,16,0,0,1,56,96H80a8,8,0,0,1,0,16H56v96H200V112H176a8,8,0,0,1,0-16h24A16,16,0,0,1,216,112ZM93.66,69.66,120,43.31V136a8,8,0,0,0,16,0V43.31l26.34,26.35a8,8,0,0,0,11.32-11.32l-40-40a8,8,0,0,0-11.32,0l-40,40A8,8,0,0,0,93.66,69.66Z";
@@ -64,7 +64,7 @@ function ControlsScene({ scheme }: { scheme: "light" | "dark" }) {
       data-theme={scheme}
       style={{
         position: "relative",
-        height: 300,
+        height: 430,
         backgroundImage: `url(tahoe-${scheme}.webp)`,
         backgroundSize: "cover",
         backgroundPosition: "center",
@@ -96,6 +96,19 @@ function ControlsScene({ scheme }: { scheme: "light" | "dark" }) {
           <Button>Continue</Button>
         </div>
         <SearchField aria-label="Search" style={{ width: 280 }} />
+        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+          <Switch aria-label="Airplane mode" defaultChecked />
+          <Slider aria-label="Volume" defaultValue={42} style={{ width: 160 }} />
+          <Menu
+            aria-label="Actions"
+            items={[
+              { label: "Share" },
+              { label: "Add to Favorites" },
+              "separator",
+              { label: "Delete", destructive: true },
+            ]}
+          />
+        </div>
       </div>
     </div>
   );
