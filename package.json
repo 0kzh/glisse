@@ -1,0 +1,76 @@
+{
+  "name": "liquidglass",
+  "version": "0.1.0",
+  "description": "Liquid Glass controls for React: button, tab bar, search field, switch, slider and menu.",
+  "keywords": [
+    "react",
+    "liquid glass",
+    "glass",
+    "ui",
+    "components",
+    "tab bar",
+    "switch",
+    "slider",
+    "menu"
+  ],
+  "license": "MIT",
+  "author": "Kelvin Zhang <me@kelvinzhang.ca>",
+  "homepage": "https://kelvinzhang.com/playground/liquid-glass",
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./refraction": {
+      "import": {
+        "types": "./dist/refraction.d.ts",
+        "default": "./dist/refraction.js"
+      },
+      "require": {
+        "types": "./dist/refraction.d.cts",
+        "default": "./dist/refraction.cjs"
+      }
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "jsdom": "^29.1.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tsdown": "^0.23.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
