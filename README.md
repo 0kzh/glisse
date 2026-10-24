@@ -30,17 +30,17 @@ Every stateful component works controlled (`value` + `onValueChange`, or `checke
 ```tsx
 <Button icon={<ShareIcon />} aria-label="Share" />
 <Button>Cancel</Button>
-<Button variant="prominent">Continue</Button>
-<Button variant="prominent" destructive>Delete</Button>
+<Button variant="filled">Continue</Button>
+<Button variant="filled" destructive>Delete</Button>
 <Button tint="#ff8d28">Order</Button>
 ```
 
-An icon on its own makes a 40px circle. Use `prominent` for the one primary action in a view; it fills with `--lg-fill`. `tint` colours a glass button's label or a prominent button's fill, as `.tint()` does on iOS, and `destructive` is a red tint. It accepts every `<button>` prop.
+An icon on its own makes a 40px circle. Use `filled` for the one primary action in a view; it fills with `--lg-fill`. `tint` colours a glass button's label or a filled button's fill, as `.tint()` does on iOS, and `destructive` is a red tint. It accepts every `<button>` prop.
 
 | Prop          | Type                     | Default   |
 | ------------- | ------------------------ | --------- |
 | `icon`        | `ReactNode`              |           |
-| `variant`     | `"glass" \| "prominent"` | `"glass"` |
+| `variant`     | `"glass" \| "filled"`    | `"glass"` |
 | `destructive` | `boolean`                | `false`   |
 | `tint`        | `string`                 |           |
 
@@ -199,7 +199,7 @@ Colours are CSS variables on `:root`, so you can override any of them:
 | `--lg-glass-active` | Hovered, pressed and focused glass |
 | `--lg-surface`      | Menu                               |
 | `--lg-on`           | Switch when on                     |
-| `--lg-fill`         | Slider fill, prominent buttons     |
+| `--lg-fill`         | Slider fill, filled buttons        |
 | `--lg-track`        | Switch track                       |
 | `--lg-rail`         | Slider track                       |
 | `--lg-destructive`  | Destructive buttons and menu items |

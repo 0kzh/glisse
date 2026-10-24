@@ -160,26 +160,26 @@
   color: var(--lg-tint);
 }
 
-.lg-button[data-variant="prominent"] {
+.lg-button[data-variant="filled"] {
   --lg-button-fill: var(--lg-tint, var(--lg-fill));
   color: #fff;
 }
 
-.lg-button[data-variant="prominent"],
-.lg-button[data-variant="prominent"]:disabled {
+.lg-button[data-variant="filled"],
+.lg-button[data-variant="filled"]:disabled {
   background-color: var(--lg-button-fill);
 }
 
-.lg-button[data-variant="prominent"]:active {
+.lg-button[data-variant="filled"]:active {
   background-color: color-mix(in srgb, var(--lg-button-fill) 85%, #000);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .lg-button[data-variant="prominent"]:hover {
+  .lg-button[data-variant="filled"]:hover {
     background-color: color-mix(in srgb, var(--lg-button-fill) 88%, #fff);
   }
 
-  .lg-button[data-variant="prominent"]:hover:active {
+  .lg-button[data-variant="filled"]:hover:active {
     background-color: color-mix(in srgb, var(--lg-button-fill) 85%, #000);
   }
 }

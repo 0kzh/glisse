@@ -28,19 +28,19 @@ test("marks its variant and destructive role", () => {
   render(
     <>
       <Button>Glass</Button>
-      <Button variant="prominent" destructive>Delete</Button>
+      <Button variant="filled" destructive>Delete</Button>
     </>,
   );
   const glass = screen.getByRole("button", { name: "Glass" });
   const remove = screen.getByRole("button", { name: "Delete" });
   expect(glass.hasAttribute("data-variant")).toBe(false);
   expect(glass.hasAttribute("data-destructive")).toBe(false);
-  expect(remove.dataset.variant).toBe("prominent");
+  expect(remove.dataset.variant).toBe("filled");
   expect(remove.dataset.destructive).toBe("");
 });
 
 test("takes a custom tint", () => {
-  render(<Button variant="prominent" tint="#ff8d28">Order</Button>);
+  render(<Button variant="filled" tint="#ff8d28">Order</Button>);
   const button = screen.getByRole("button", { name: "Order" });
   expect(button.hasAttribute("data-tint")).toBe(true);
   expect(button.style.getPropertyValue("--lg-tint")).toBe("#ff8d28");

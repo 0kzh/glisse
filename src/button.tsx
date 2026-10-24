@@ -16,11 +16,11 @@ import { useRefraction } from "./internal/refraction";
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** Shown before the label. On its own, the button is a circle; give it an `aria-label`. */
   icon?: ReactNode;
-  /** `glass` is clear; `prominent` fills it with the accent colour, for the primary action. */
-  variant?: "glass" | "prominent";
+  /** `glass` is clear; `filled` fills it with the accent colour, for the primary action. */
+  variant?: "glass" | "filled";
   /** Marks an action that deletes or can't be undone. Shorthand for a red `tint`. */
   destructive?: boolean;
-  /** Any CSS colour. Tints a glass button's label, or a prominent button's fill. */
+  /** Any CSS colour. Tints a glass button's label, or a filled button's fill. */
   tint?: string;
 }
 
