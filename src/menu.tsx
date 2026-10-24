@@ -168,13 +168,15 @@ export function Menu({ items, "aria-label": label, icon = ellipsis, align = "end
       card.dataset.scrubbing = "";
       plate.style.width = `${row.offsetWidth}px`;
       plate.style.height = `${row.offsetHeight}px`;
+      // The first row lights up in place and at once, taking over from the
+      // row's own hover background without a gap; later rows slide to it.
       if (first) plate.style.transition = "none";
       plate.style.transform = `translate(${row.offsetLeft}px, ${row.offsetTop}px)`;
+      plate.style.opacity = "1";
       if (first) {
         void plate.offsetWidth;
         plate.style.transition = "";
       }
-      plate.style.opacity = "1";
     };
 
     const rowAt = (clientX: number, clientY: number) => {
