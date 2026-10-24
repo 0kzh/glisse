@@ -23,7 +23,9 @@
   "bugs": "https://github.com/0kzh/glisse/issues",
   "type": "module",
   "sideEffects": [
-    "*.css"
+    "*.css",
+    "./dist/index.js",
+    "./dist/index.cjs"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -62,6 +64,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "jsdom": "^29.1.1",
+    "lightningcss": "^1.33.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tsdown": "^0.23.2",

@@ -12,10 +12,9 @@ No dependencies beyond React 18. Each component tree-shakes on its own.
 npm install glisse
 ```
 
-Import the stylesheet once, then use the components anywhere.
+Use the components anywhere. Their styles come with them.
 
 ```tsx
-import "glisse/styles.css";
 import { Switch } from "glisse";
 
 function Settings() {
@@ -178,6 +177,19 @@ The menu grows out of its button and shrinks back into it, as on iOS. One highli
 ```
 
 A plain glass surface for anything else, such as a card. It renders a `<div>` and accepts every prop one does.
+
+## Styles
+
+Glisse adds its stylesheet to the page the first time it loads in the browser. It goes at the start of `<head>`, so your own CSS still wins ties.
+
+Import the stylesheet as a file as well when:
+
+- the page is rendered on the server, so glass is styled before any script runs, or
+- a Content Security Policy blocks inline styles.
+
+```tsx
+import "glisse/styles.css";
+```
 
 ## Theming
 

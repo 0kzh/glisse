@@ -1,3 +1,8 @@
+import { insertStyles } from "./internal/styles";
+import css from "./styles.css?inline";
+
+insertStyles(css);
+
 export { Button, type ButtonProps } from "./button";
 export { Glass, type GlassProps } from "./glass";
 export { Input, type InputProps } from "./input";
