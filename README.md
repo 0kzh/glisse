@@ -96,7 +96,7 @@ import Link from "next/link";
 <Input aria-label="Email" type="email" placeholder="Email" icon={<EnvelopeIcon />} />
 ```
 
-A glass text field. Other props go to the `<input>`.
+A glass text field. Other props go to the `<input>`; with `type="search"` it gains a clear button.
 
 | Prop            | Type                      | Default |
 | --------------- | ------------------------- | ------- |
@@ -111,20 +111,12 @@ A glass text field. Other props go to the `<input>`.
 <SearchField aria-label="Search" value={query} onValueChange={setQuery} />
 ```
 
-Includes a clear button that keeps focus in the field. Other props go to the `<input>`.
-
-| Prop            | Type                      | Default    |
-| --------------- | ------------------------- | ---------- |
-| `value`         | `string`                  |            |
-| `defaultValue`  | `string`                  | `""`       |
-| `onValueChange` | `(value: string) => void` |            |
-| `placeholder`   | `string`                  | `"Search"` |
+An `Input` with `type="search"`, a magnifier icon and a "Search" placeholder. It takes the same props, so you can swap the icon. Typing shows a clear button that keeps focus in the field.
 
 ## Switch
 
 ```tsx
 <Switch aria-label="Wi-Fi" checked={on} onCheckedChange={setOn} />
-<Switch aria-label="Bluetooth" size="lg" />
 ```
 
 Hold the thumb and it lifts into clear glass. Drag it across, or past either end to feel it resist.
@@ -134,9 +126,8 @@ Hold the thumb and it lifts into clear glass. Drag it across, or past either end
 | `checked`         | `boolean`                    |         |
 | `defaultChecked`  | `boolean`                    | `false` |
 | `onCheckedChange` | `(checked: boolean) => void` |         |
-| `size`            | `"sm" \| "md" \| "lg"`       | `"sm"`  |
 
-The tracks are 60, 80 and 100px wide.
+The track is 60px wide, as on iOS.
 
 ## Slider
 

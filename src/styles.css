@@ -345,9 +345,9 @@
   opacity: 0;
 }
 
-/* Search field and input */
+/* Input */
 
-:is(.lg-search, .lg-input) {
+.lg-input {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -361,11 +361,11 @@
   transition: background-color 200ms ease;
 }
 
-:is(.lg-search, .lg-input):focus-within {
+.lg-input:focus-within {
   background-color: var(--lg-glass-active);
 }
 
-:is(.lg-search, .lg-input) input {
+.lg-input input {
   flex: 1;
   min-width: 0;
   height: 100%;
@@ -378,15 +378,15 @@
   font-size: 14px;
 }
 
-:is(.lg-search, .lg-input) input::placeholder {
+.lg-input input::placeholder {
   color: var(--lg-muted);
 }
 
-.lg-search input::-webkit-search-cancel-button {
+.lg-input input::-webkit-search-cancel-button {
   display: none;
 }
 
-:is(.lg-search-icon, .lg-input-icon) {
+.lg-input-icon {
   flex: none;
   width: 16px;
   height: 16px;
@@ -403,7 +403,7 @@
   height: 100%;
 }
 
-.lg-search-clear {
+.lg-input-clear {
   display: grid;
   flex: none;
   place-items: center;
@@ -418,12 +418,12 @@
   cursor: pointer;
 }
 
-.lg-search-clear svg {
+.lg-input-clear svg {
   width: 14px;
   height: 14px;
 }
 
-:is(.lg-search, .lg-input):has(input:disabled) {
+.lg-input:has(input:disabled) {
   opacity: 0.35;
 }
 
@@ -468,13 +468,6 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.lg-switch[data-size="md"] {
-  --lg-scale: 0.5;
-}
-
-.lg-switch[data-size="lg"] {
-  --lg-scale: 0.625;
-}
 
 .lg-switch::before {
   content: "";

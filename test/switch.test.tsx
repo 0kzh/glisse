@@ -30,13 +30,3 @@ test("ignores input while disabled", () => {
   fireEvent.click(screen.getByRole("switch"));
   expect(onCheckedChange).not.toHaveBeenCalled();
 });
-
-test("defaults to the small size", () => {
-  render(<Switch aria-label="Wi-Fi" />);
-  expect(screen.getByRole("switch").dataset.size).toBe("sm");
-});
-
-test("takes a size", () => {
-  render(<Switch aria-label="Wi-Fi" size="lg" />);
-  expect(screen.getByRole("switch").dataset.size).toBe("lg");
-});

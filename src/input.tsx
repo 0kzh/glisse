@@ -31,9 +31,32 @@ export const Input: ForwardRefExoticComponent<InputProps & RefAttributes<HTMLInp
   useRefraction(rootRef);
 
   return (
-    <div ref={rootRef} className={cx("lg-glass lg-input", className)} style={style} onPointerDown={() => inputRef.current?.focus()}>
+    <div
+      ref={rootRef}
+      className={cx("lg-glass lg-input", className)}
+      style={style}
+      onPointerDown={(event) => {
+        if (event.target !== inputRef.current) inputRef.current?.focus();
+      }}
+    >
       {icon == null ? null : <span className="lg-input-icon">{icon}</span>}
       <input ref={inputRef} value={value} onChange={(event) => setValue(event.currentTarget.value)} {...props} />
+      {props.type === "search" && value && !props.disabled ? (
+        <button
+          type="button"
+          className="lg-input-clear"
+          aria-label="Clear"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setValue("");
+            inputRef.current?.focus();
+          }}
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" aria-hidden>
+            <path d="m4.5 4.5 7 7m0-7-7 7" />
+          </svg>
+        </button>
+      ) : null}
     </div>
   );
 });

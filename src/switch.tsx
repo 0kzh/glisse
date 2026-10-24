@@ -17,18 +17,17 @@ export interface SwitchProps
   checked?: boolean;
   defaultChecked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
-  /** Track width: 60, 80 or 100px. */
-  size?: "sm" | "md" | "lg";
 }
 
-const SCALE = { sm: 0.375, md: 0.5, lg: 0.625 } as const;
+// How far the thumb travels across the 60px track.
+const TRAVEL = 57.9 * 0.375;
 const unit = (value: number) => Math.min(1, Math.max(0, value));
 
 export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLButtonElement>> = /* @__PURE__ */ forwardRef<
   HTMLButtonElement,
   SwitchProps
 >(function Switch(
-  { checked: checkedProp, defaultChecked = false, onCheckedChange, size = "sm", className, ...props },
+  { checked: checkedProp, defaultChecked = false, onCheckedChange, className, ...props },
   forwardedRef,
 ) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -36,7 +35,7 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
   const thumbRef = useRef<HTMLSpanElement>(null);
   const faceRef = useRef<HTMLSpanElement>(null);
   const [checked, setChecked] = useControllable(checkedProp, defaultChecked, onCheckedChange);
-  const travel = 57.9 * SCALE[size];
+  const travel = TRAVEL;
   const latest = useRef({ checked, setChecked, travel });
   const springs = useRef<{ position: Spring; color: Spring } | null>(null);
   useImperativeHandle(forwardedRef, () => ref.current!);
@@ -171,7 +170,6 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
       type="button"
       role="switch"
       aria-checked={checked}
-      data-size={size}
       className={cx("lg-switch", className)}
       {...props}
     >

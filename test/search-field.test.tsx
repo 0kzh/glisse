@@ -24,3 +24,8 @@ test("hides the clear button while disabled", () => {
   render(<SearchField aria-label="Search docs" value="glass" disabled />);
   expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
 });
+
+test("takes a custom icon", () => {
+  render(<SearchField aria-label="Search docs" icon={<svg data-testid="custom" />} />);
+  expect(screen.getByTestId("custom")).toBeTruthy();
+});
