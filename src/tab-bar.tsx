@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   type CSSProperties,
   type ElementType,
@@ -56,6 +57,7 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   let growY = 12;
   let active = -1;
   let shown = false;
+  let settleFrame = 0;
   let gesture: { id: number; x: number; anchor: number; moved: boolean; box: DOMRect } | null = null;
   const state = { x: 0, lift: 0 };
 
@@ -124,6 +126,9 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   const onPointerDown = (event: PointerEvent) => {
     const tab = (event.target as Element).closest<HTMLElement>(".lg-tab");
     if (!event.isPrimary || event.button !== 0 || gesture || !tab) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    cancelAnimationFrame(settleFrame);
+    settleFrame = 0;
     measure();
     const box = bar.getBoundingClientRect();
     gesture = { id: event.pointerId, x: event.clientX, anchor: tabs.indexOf(tab) * slot, moved: false, box };
@@ -149,18 +154,31 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
 
   const onPointerEnd = (event: PointerEvent) => {
     if (event.pointerId !== gesture?.id) return;
+    // Touch implicitly captures the tab before a drag captures the bar. The
+    // tab's bubbling capture-loss event is a handoff, not the end of the drag.
+    if (event.type === "lostpointercapture" && event.target !== bar) return;
     const index = Math.round(position(event) / slot);
     const { moved, box } = release()!;
-    if (moved) {
+    const inside = event.type === "pointerup" && event.clientY >= box.top - 24 && event.clientY <= box.bottom + 24;
+    if (inside) {
+      // Activate taps and drags at release, before settling. Waiting for the
+      // browser's click briefly sends the lens back toward the old selection.
       suppressClick = true;
-      const inside = event.type === "pointerup" && event.clientY >= box.top - 24 && event.clientY <= box.bottom + 24;
-      if (inside) tabs[index]?.click();
+      // React may commit a controlled selection after the click handler. Use
+      // its new value, or settle back if the consumer declines the change.
+      settleFrame = requestAnimationFrame(() => {
+        settleFrame = 0;
+        settle();
+      });
+      tabs[index]?.click();
+    } else {
+      suppressClick = moved;
+      settle();
     }
-    settle();
   };
 
   const onClick = (event: MouseEvent) => {
-    if (event.isTrusted && suppressClick) {
+    if (event.isTrusted && suppressClick && event.detail !== 0) {
       suppressClick = false;
       event.preventDefault();
       return;
@@ -191,6 +209,8 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   };
 
   const reset = () => {
+    cancelAnimationFrame(settleFrame);
+    settleFrame = 0;
     release();
     settle(true);
   };
@@ -217,10 +237,13 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
 
   return {
     setActive(index) {
+      cancelAnimationFrame(settleFrame);
+      settleFrame = 0;
       active = index;
       settle();
     },
     destroy() {
+      cancelAnimationFrame(settleFrame);
       x.stop();
       lift.stop();
       observer.disconnect();
@@ -283,7 +306,7 @@ export function TabBar({
     };
   }, [signature]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     controller.current?.setActive(selected);
   }, [selected]);
 

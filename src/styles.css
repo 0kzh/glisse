@@ -258,6 +258,7 @@
   background: none;
   text-decoration: none;
   cursor: pointer;
+  -webkit-touch-callout: none;
   transition: color 200ms ease;
 }
 

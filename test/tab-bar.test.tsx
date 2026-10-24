@@ -1,14 +1,134 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { forwardRef, type AnchorHTMLAttributes } from "react";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import { TabBar } from "../src";
+
+afterEach(() => vi.restoreAllMocks());
 
 const items = [
   { value: "day", label: "Day" },
   { value: "week", label: "Week" },
   { value: "month", label: "Month" },
 ];
+
+function touchTabs({ navigation = false, controlled = false } = {}) {
+  const onValueChange = vi.fn();
+  const entries = navigation ? items.map((item) => ({ ...item, href: `#${item.value}` })) : items;
+  render(<TabBar aria-label="Range" items={entries} defaultValue="day" value={controlled ? "day" : undefined} onValueChange={onValueChange} />);
+  const bar = screen.getByRole(navigation ? "navigation" : "tablist", { name: "Range" });
+  const day = screen.getByRole(navigation ? "link" : "tab", { name: "Day" });
+  const lens = bar.querySelector<HTMLElement>(".lg-tab-lens")!;
+  bar.style.padding = "4px";
+  bar.style.setProperty("--lg-lens-grow-x", "27px");
+  bar.style.setProperty("--lg-lens-grow-y", "20px");
+  vi.spyOn(lens, "offsetHeight", "get").mockReturnValue(32);
+  vi.spyOn(bar, "clientWidth", "get").mockReturnValue(260);
+  vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+    x: 20, y: 100, left: 20, top: 100, right: 280, bottom: 140,
+    width: 260, height: 40, toJSON() {},
+  });
+  const pointer = { pointerId: 7, pointerType: "touch", isPrimary: true, button: 0, clientX: 66, clientY: 120 };
+  return { bar, day, lens, pointer, onValueChange };
+}
+
+test("keeps dragging when touch capture transfers from the tab to the bar", () => {
+  const { bar, day, pointer, onValueChange } = touchTabs();
+  fireEvent.pointerDown(day, pointer);
+  fireEvent.pointerMove(day, { ...pointer, clientX: 80 });
+  // Touch starts with implicit capture on the button. Transferring capture to
+  // its parent emits this bubbling event before the next captured move.
+  fireEvent.lostPointerCapture(day, pointer);
+  expect(bar.hasAttribute("data-lifted")).toBe(true);
+
+  fireEvent.pointerMove(bar, { ...pointer, clientX: 234 });
+  fireEvent.pointerUp(bar, { ...pointer, clientX: 234 });
+  expect(onValueChange).toHaveBeenCalledExactlyOnceWith("month");
+  expect(screen.getByRole("tab", { name: "Month" }).getAttribute("aria-selected")).toBe("true");
+  expect(bar.hasAttribute("data-lifted")).toBe(false);
+});
+
+test("activates only the destination link after a touch capture handoff", () => {
+  const { bar, day, pointer, onValueChange } = touchTabs({ navigation: true });
+  fireEvent.pointerDown(day, pointer);
+  const month = screen.getByRole("link", { name: "Month" });
+  const clicked = vi.fn((event: Event) => event.preventDefault());
+  month.addEventListener("click", clicked);
+  fireEvent.pointerMove(day, { ...pointer, clientX: 80 });
+  fireEvent.lostPointerCapture(day, pointer);
+  fireEvent.pointerMove(bar, { ...pointer, clientX: 234 });
+  fireEvent.pointerUp(bar, { ...pointer, clientX: 234 });
+  expect(onValueChange).toHaveBeenCalledExactlyOnceWith("month");
+  expect(clicked).toHaveBeenCalledOnce();
+  expect(month.getAttribute("aria-current")).toBe("page");
+});
+
+test.each(["pointerCancel", "lostPointerCapture"] as const)("cancels a drag on %s from the bar", (event) => {
+  const { bar, day, pointer, onValueChange } = touchTabs();
+  fireEvent.pointerDown(day, pointer);
+  fireEvent.pointerMove(day, { ...pointer, clientX: 234 });
+  fireEvent[event](bar, { ...pointer, clientX: 234 });
+  fireEvent.pointerUp(bar, { ...pointer, clientX: 234 });
+  expect(onValueChange).not.toHaveBeenCalled();
+  expect(day.getAttribute("aria-selected")).toBe("true");
+  expect(bar.hasAttribute("data-lifted")).toBe(false);
+});
+
+test.each([false, true])("a tap never sends the indicator back toward the old tab (navigation: %s)", (navigation) => {
+  const { lens, pointer, onValueChange } = touchTabs({ navigation });
+  vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+  const month = screen.getByRole(navigation ? "link" : "tab", { name: "Month" });
+  month.addEventListener("click", (event) => event.preventDefault());
+  const writes = vi.spyOn(lens.style, "transform", "set");
+  fireEvent.pointerDown(month, { ...pointer, clientX: 234 });
+  writes.mockClear();
+  fireEvent.pointerUp(month, { ...pointer, clientX: 234 });
+
+  expect(onValueChange).toHaveBeenCalledExactlyOnceWith("month");
+  expect(writes.mock.calls.length).toBeGreaterThan(0);
+  for (const [transform] of writes.mock.calls) {
+    expect(transform).toMatch(/^translateX\(168px\)/);
+  }
+  expect(month.getAttribute(navigation ? "aria-current" : "aria-selected")).toBe(navigation ? "page" : "true");
+});
+
+test("settles back when a controlled value declines a tap", async () => {
+  const { bar, lens, pointer, onValueChange } = touchTabs({ controlled: true });
+  vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+  const month = bar.querySelectorAll<HTMLElement>(".lg-tab")[2]!;
+  fireEvent.pointerDown(month, { ...pointer, clientX: 234 });
+  fireEvent.pointerUp(month, { ...pointer, clientX: 234 });
+  await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+
+  expect(onValueChange).toHaveBeenCalledExactlyOnceWith("month");
+  expect(month.getAttribute("aria-selected")).toBe("false");
+  expect(lens.style.transform).toMatch(/^translateX\(0px\)/);
+});
+
+test("a tap on the selected tab releases its lift", async () => {
+  const { bar, day, lens, pointer, onValueChange } = touchTabs();
+  vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+  fireEvent.pointerDown(day, pointer);
+  fireEvent.pointerUp(day, pointer);
+  await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+  expect(onValueChange).toHaveBeenCalledExactlyOnceWith("day");
+  expect(bar.hasAttribute("data-lifted")).toBe(false);
+  expect(lens.style.transform).toBe("translateX(0px) scale(1, 1)");
+});
+
+test("leaves modified link taps to the browser", () => {
+  const { bar, pointer, onValueChange } = touchTabs({ navigation: true });
+  const month = screen.getByRole("link", { name: "Month" });
+  const clicked = vi.fn((event: Event) => event.preventDefault());
+  month.addEventListener("click", clicked);
+  fireEvent.pointerDown(month, { ...pointer, clientX: 234, metaKey: true });
+  fireEvent.pointerUp(month, { ...pointer, clientX: 234, metaKey: true });
+  expect(clicked).not.toHaveBeenCalled();
+  expect(bar.hasAttribute("data-lifted")).toBe(false);
+  fireEvent.click(month, { metaKey: true });
+  expect(clicked).toHaveBeenCalledOnce();
+  expect(onValueChange).not.toHaveBeenCalled();
+});
 
 test("selects tabs by click", () => {
   const onValueChange = vi.fn();

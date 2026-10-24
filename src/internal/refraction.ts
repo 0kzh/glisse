@@ -202,8 +202,11 @@ function lens(width: number, height: number, radius: number, selection: boolean,
         scale,
         xChannelSelector: "R",
         yChannelSelector: "G",
-        result: "displaced",
+        result: "bent",
       }),
+      // The displacement samples the nearest pixel, which leaves stair-steps
+      // where the rim bends hardest; a sub-pixel blur smooths them.
+      svg("feGaussianBlur", { in: "bent", stdDeviation: 0.4, result: "displaced" }),
       svg("feColorMatrix", { in: "displaced", type: "saturate", values: 1.5, result: "face" }),
     );
     // Along the rim highlight, show the bent backdrop far more saturated, so
