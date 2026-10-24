@@ -266,8 +266,8 @@ function whenIdle(callback: () => void): () => void {
   return () => clearTimeout(handle);
 }
 
-// Only Chromium applies SVG filters to a backdrop; elsewhere the glass keeps its blur.
-const supported = () => /Chrom(?:e|ium)\//.test(navigator.userAgent);
+/** Only Chromium applies SVG filters to the live backdrop. */
+export const refractsBackdrop = (): boolean => /Chrom(?:e|ium)\//.test(navigator.userAgent);
 
 function refract(element: HTMLElement, selection: boolean): () => void {
   let cancel: (() => void) | undefined;
@@ -284,9 +284,14 @@ function refract(element: HTMLElement, selection: boolean): () => void {
   };
 }
 
-export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false): void {
+/**
+ * Fits a lens filter to the element and exposes it as `--lg-filter`. Glass
+ * applies it to the live backdrop in Chromium; elsewhere it keeps its blur,
+ * unless `copied` says it carries a copy of its backdrop to filter instead.
+ */
+export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false, copied = false): void {
   useEffect(() => {
     const element = ref.current;
-    if (element && supported()) return refract(element, selection);
-  }, [ref, selection]);
+    if (element && (copied || refractsBackdrop())) return refract(element, selection);
+  }, [ref, selection, copied]);
 }

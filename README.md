@@ -178,6 +178,12 @@ The menu grows out of its button and shrinks back into it, as on iOS. One highli
 
 A plain glass surface for anything else, such as a card. It renders a `<div>` and accepts every prop one does.
 
+| Prop       | Type        | Default |
+| ---------- | ----------- | ------- |
+| `backdrop` | `ReactNode` |         |
+
+`backdrop` is a copy of what sits behind the glass, laid out to fill the glass's positioned parent. It lets Safari and Firefox refract too: see [Refraction](#refraction).
+
 ## Styles
 
 Glisse adds its stylesheet to the page the first time it loads in the browser. It goes at the start of `<head>`, so your own CSS still wins ties.
@@ -218,11 +224,22 @@ Colours are CSS variables on `:root`, so you can override any of them:
 
 ## Refraction
 
-In Chromium browsers, glass refracts the backdrop through a curved rim, with nothing to set up. Safari and Firefox can't filter a backdrop through SVG, so there the glass keeps its blur.
+In Chromium browsers, glass refracts the backdrop through a curved rim, with nothing to set up. Safari and Firefox can't filter the live backdrop through SVG, so there the glass keeps its blur.
+
+To refract in Safari and Firefox as well, give a `Glass` a copy of what's behind it. Render the same content as `backdrop`, sized to fill the glass's positioned parent, just as the original does. Those browsers then refract the copy, kept lined up with the original as the glass moves, scrolls or scales; Chromium ignores it and keeps refracting the live page.
+
+```tsx
+<div style={{ position: "relative" }}>
+  <Photo />
+  <Glass backdrop={<Photo />} style={{ position: "absolute", left: 40, top: 40, width: 160, height: 160, borderRadius: 80 }} />
+</div>
+```
+
+Controls over arbitrary page content, such as a navigation bar, can't carry a copy, so they keep the blur there.
 
 The curved rim is `--lg-bezel` wide and the glass `--lg-thickness` deep, both sized from the element by default. A bezel as wide as the radius bends the whole face, like a magnifying glass. `--lg-refraction` (1) scales how far the rim bends.
 
-Two more variables turn glass into a lens. `--lg-zoom` (1) magnifies what's behind it, and `--lg-rim-saturation` (1) saturates the backdrop where it crosses the rim highlight, so strong edges break into colour. For a clear lens, drop the tint and keep only the refraction, as below.
+Two more variables turn glass into a lens. `--lg-zoom` (1) magnifies what's behind it, and `--lg-rim-saturation` (1) saturates the backdrop where it crosses the rim highlight, so strong edges break into colour. For a clear lens, drop the tint and set the frost, `--lg-blur` (3px), to zero.
 
 ```tsx
 <Glass
@@ -231,7 +248,7 @@ Two more variables turn glass into a lens. `--lg-zoom` (1) magnifies what's behi
     height: 150,
     borderRadius: 75,
     background: "none",
-    backdropFilter: "var(--lg-filter, blur(3px))",
+    "--lg-blur": "0px",
     "--lg-bezel": "25px",
     "--lg-thickness": "50px",
     "--lg-zoom": 1.13,
