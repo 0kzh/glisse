@@ -1,22 +1,22 @@
-# liquidglass
+# Glisse
 
-Liquid Glass controls for React: a button, tab bar, input, search field, switch, slider and menu that press, stretch and settle on springs, and refract what's behind them in Chromium.
+Glisse is a set of Liquid Glass controls for React: a button, tab bar, input, search field, switch, slider and menu that press, stretch and settle on springs, and refract what's behind them in Chromium.
 
-No dependencies beyond React 18. About 8 kB gzipped for everything, and each component tree-shakes on its own.
+No dependencies beyond React 18. Each component tree-shakes on its own.
 
 [Live demo](https://kelvinzhang.com/playground/liquid-glass)
 
 ## Install
 
 ```bash
-npm install liquidglass
+npm install glisse
 ```
 
 Import the stylesheet once, then use the components anywhere.
 
 ```tsx
-import "liquidglass/styles.css";
-import { Switch } from "liquidglass";
+import "glisse/styles.css";
+import { Switch } from "glisse";
 
 function Settings() {
   return <Switch aria-label="Wi-Fi" defaultChecked />;

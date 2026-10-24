@@ -146,7 +146,7 @@ function lens(width: number, height: number, radius: number, selection: boolean,
   if (cached) return cached;
 
   const { displacement, highlight, zoom, scale } = maps(width, height, radius, selection, shape);
-  const id = `liquidglass-${lenses.size}`;
+  const id = `glisse-${lenses.size}`;
   const box = { x: 0, y: 0, width, height };
   const filter = svg("filter", {
     id,

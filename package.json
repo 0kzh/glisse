@@ -1,7 +1,7 @@
 {
-  "name": "liquidglass",
+  "name": "glisse",
   "version": "0.1.0",
-  "description": "Liquid Glass controls for React: button, tab bar, input, search field, switch, slider, menu and glass.",
+  "description": "Liquid Glass controls for React, with spring animations and real refraction.",
   "keywords": [
     "react",
     "liquid glass",
@@ -18,9 +18,9 @@
   "homepage": "https://kelvinzhang.com/playground/liquid-glass",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/0kzh/liquidglass.git"
+    "url": "git+https://github.com/0kzh/glisse.git"
   },
-  "bugs": "https://github.com/0kzh/liquidglass/issues",
+  "bugs": "https://github.com/0kzh/glisse/issues",
   "type": "module",
   "sideEffects": [
     "*.css"
