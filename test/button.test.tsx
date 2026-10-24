@@ -38,3 +38,10 @@ test("marks its variant and destructive role", () => {
   expect(remove.dataset.variant).toBe("prominent");
   expect(remove.dataset.destructive).toBe("");
 });
+
+test("takes a custom tint", () => {
+  render(<Button variant="prominent" tint="#ff8d28">Order</Button>);
+  const button = screen.getByRole("button", { name: "Order" });
+  expect(button.hasAttribute("data-tint")).toBe(true);
+  expect(button.style.getPropertyValue("--lg-tint")).toBe("#ff8d28");
+});

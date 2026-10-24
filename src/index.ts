@@ -1,5 +1,6 @@
 export { Button, type ButtonProps } from "./button";
 export { Glass, type GlassProps } from "./glass";
+export { Input, type InputProps } from "./input";
 export { Menu, type MenuEntry, type MenuItem, type MenuProps } from "./menu";
 export { SearchField, type SearchFieldProps } from "./search-field";
 export { Slider, type SliderProps } from "./slider";

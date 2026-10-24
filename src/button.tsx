@@ -3,6 +3,7 @@ import {
   useImperativeHandle,
   useRef,
   type ButtonHTMLAttributes,
+  type CSSProperties,
   type ForwardRefExoticComponent,
   type ReactNode,
   type RefAttributes,
@@ -17,15 +18,17 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode;
   /** `glass` is clear; `prominent` fills it with the accent colour, for the primary action. */
   variant?: "glass" | "prominent";
-  /** Marks an action that deletes or can't be undone. */
+  /** Marks an action that deletes or can't be undone. Shorthand for a red `tint`. */
   destructive?: boolean;
+  /** Any CSS colour. Tints a glass button's label, or a prominent button's fill. */
+  tint?: string;
 }
 
 export const Button: ForwardRefExoticComponent<ButtonProps & RefAttributes<HTMLButtonElement>> = /* @__PURE__ */ forwardRef<
   HTMLButtonElement,
   ButtonProps
 >(function Button(
-  { icon, variant = "glass", destructive, children, className, type = "button", ...props },
+  { icon, variant = "glass", destructive, tint, children, className, style, type = "button", ...props },
   forwardedRef,
 ) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -41,6 +44,8 @@ export const Button: ForwardRefExoticComponent<ButtonProps & RefAttributes<HTMLB
       data-icon={icon == null ? undefined : children == null ? "only" : ""}
       data-variant={variant === "glass" ? undefined : variant}
       data-destructive={destructive ? "" : undefined}
+      data-tint={tint ? "" : undefined}
+      style={tint ? ({ ...style, "--lg-tint": tint } as CSSProperties) : style}
       {...props}
     >
       {icon}

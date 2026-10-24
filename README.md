@@ -1,6 +1,6 @@
 # liquidglass
 
-Liquid Glass controls for React: a button, tab bar, search field, switch, slider and menu that press, stretch and settle on springs, and refract what's behind them in Chromium.
+Liquid Glass controls for React: a button, tab bar, input, search field, switch, slider and menu that press, stretch and settle on springs, and refract what's behind them in Chromium.
 
 No dependencies beyond React 18. About 8 kB gzipped for everything, and each component tree-shakes on its own.
 
@@ -32,15 +32,17 @@ Every stateful component works controlled (`value` + `onValueChange`, or `checke
 <Button>Cancel</Button>
 <Button variant="prominent">Continue</Button>
 <Button variant="prominent" destructive>Delete</Button>
+<Button tint="#ff8d28">Order</Button>
 ```
 
-An icon on its own makes a 40px circle. Use `prominent` for the one primary action in a view; it fills with `--lg-fill`. `destructive` turns a glass button's label red and a prominent button's fill red. It accepts every `<button>` prop.
+An icon on its own makes a 40px circle. Use `prominent` for the one primary action in a view; it fills with `--lg-fill`. `tint` colours a glass button's label or a prominent button's fill, as `.tint()` does on iOS, and `destructive` is a red tint. It accepts every `<button>` prop.
 
 | Prop          | Type                     | Default   |
 | ------------- | ------------------------ | --------- |
 | `icon`        | `ReactNode`              |           |
 | `variant`     | `"glass" \| "prominent"` | `"glass"` |
 | `destructive` | `boolean`                | `false`   |
+| `tint`        | `string`                 |           |
 
 ## TabBar
 
@@ -86,6 +88,22 @@ import Link from "next/link";
 | `link`          | `ElementType`             | `"a"`   |
 
 `TabBarItem` is `{ value: string; label: ReactNode; href?: string }`. Set the tab size with `--lg-tab-width` (84px) and `--lg-tab-height` (32px). While a tab is held, the selection grows by `--lg-lens-grow-x` (27px) and `--lg-lens-grow-y` (20px).
+
+## Input
+
+```tsx
+<Input aria-label="Name" placeholder="Name" value={name} onValueChange={setName} />
+<Input aria-label="Email" type="email" placeholder="Email" icon={<EnvelopeIcon />} />
+```
+
+A glass text field. Other props go to the `<input>`.
+
+| Prop            | Type                      | Default |
+| --------------- | ------------------------- | ------- |
+| `value`         | `string`                  |         |
+| `defaultValue`  | `string`                  | `""`    |
+| `onValueChange` | `(value: string) => void` |         |
+| `icon`          | `ReactNode`               |         |
 
 ## SearchField
 

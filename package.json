@@ -1,7 +1,7 @@
 {
   "name": "liquidglass",
   "version": "0.1.0",
-  "description": "Liquid Glass controls for React: button, tab bar, search field, switch, slider, menu and glass.",
+  "description": "Liquid Glass controls for React: button, tab bar, input, search field, switch, slider, menu and glass.",
   "keywords": [
     "react",
     "liquid glass",
