@@ -10,7 +10,7 @@ import {
 
 import { useControllable } from "./internal/controllable";
 import { cx } from "./internal/cx";
-import { useRefraction } from "./internal/registry";
+import { useRefraction } from "./internal/refraction";
 import { createSpring } from "./internal/spring";
 
 export interface TabBarItem {
@@ -52,6 +52,8 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   const tabs = [...bar.querySelectorAll<HTMLElement>(".lg-tab")];
   let slot = 0;
   let height = 0;
+  let growX = 16;
+  let growY = 12;
   let active = -1;
   let shown = false;
   let gesture: { id: number; x: number; anchor: number; moved: boolean; box: DOMRect } | null = null;
@@ -61,12 +63,14 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
     const style = getComputedStyle(bar);
     slot = (bar.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)) / tabs.length;
     height = lens.offsetHeight;
+    growX = parseFloat(style.getPropertyValue("--lg-lens-grow-x")) || 0;
+    growY = parseFloat(style.getPropertyValue("--lg-lens-grow-y")) || 0;
   };
 
   const paint = () => {
     const { x, lift } = state;
-    const sx = 1 + (16 / slot) * lift;
-    const sy = 1 + (12 / height) * lift;
+    const sx = 1 + (growX / slot) * lift;
+    const sy = 1 + (growY / height) * lift;
     lens.style.transform = tint.style.transform = `translateX(${x}px) scale(${sx}, ${sy})`;
     row.style.transform = `scale(${1 / sx}, ${1 / sy}) translate(${-x + ((sx - 1) * slot) / 2}px, ${((sy - 1) * height) / 2}px)`;
     if (!gesture && lift < 0.01) delete bar.dataset.refracting;
@@ -120,6 +124,7 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   const onPointerDown = (event: PointerEvent) => {
     const tab = (event.target as Element).closest<HTMLElement>(".lg-tab");
     if (!event.isPrimary || event.button !== 0 || gesture || !tab) return;
+    measure();
     const box = bar.getBoundingClientRect();
     gesture = { id: event.pointerId, x: event.clientX, anchor: tabs.indexOf(tab) * slot, moved: false, box };
     suppressClick = false;

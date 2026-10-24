@@ -1,7 +1,7 @@
 {
   "name": "liquidglass",
   "version": "0.1.0",
-  "description": "Liquid Glass controls for React: button, tab bar, search field, switch, slider and menu.",
+  "description": "Liquid Glass controls for React: button, tab bar, search field, switch, slider, menu and glass.",
   "keywords": [
     "react",
     "liquid glass",
@@ -32,16 +32,6 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
-      }
-    },
-    "./refraction": {
-      "import": {
-        "types": "./dist/refraction.d.ts",
-        "default": "./dist/refraction.js"
-      },
-      "require": {
-        "types": "./dist/refraction.d.cts",
-        "default": "./dist/refraction.cjs"
       }
     },
     "./styles.css": "./dist/styles.css",

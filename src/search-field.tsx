@@ -9,7 +9,7 @@ import {
 
 import { useControllable } from "./internal/controllable";
 import { cx } from "./internal/cx";
-import { useRefraction } from "./internal/registry";
+import { useRefraction } from "./internal/refraction";
 
 export interface SearchFieldProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "defaultValue" | "onChange"> {

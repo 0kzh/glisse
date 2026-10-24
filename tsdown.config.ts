@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/refraction.ts"],
+  entry: ["src/index.ts"],
   format: ["esm", "cjs"],
   platform: "neutral",
   dts: true,

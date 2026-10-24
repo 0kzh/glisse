@@ -1,4 +1,4 @@
-import { register } from "./internal/registry";
+import { useEffect, type RefObject } from "react";
 
 // Refraction model: https://kube.io/blog/liquid-glass-css-svg/
 
@@ -6,6 +6,14 @@ const SVG = "http://www.w3.org/2000/svg";
 interface Lens {
   filter: string;
   rim: string;
+}
+
+interface Shape {
+  bezel: number | undefined;
+  thickness: number | undefined;
+  level: number;
+  zoom: number;
+  saturation: number;
 }
 
 const lenses = new Map<string, Lens>();
@@ -29,7 +37,7 @@ function container(): SVGDefsElement {
   return defs;
 }
 
-function profile(bezel: number, thickness: number, cap: number): { samples: Float32Array; maximum: number } {
+function profile(bezel: number, thickness: number): { samples: Float32Array; maximum: number } {
   const samples = new Float32Array(128);
   let maximum = 0;
   for (let i = 0; i < samples.length; i++) {
@@ -37,17 +45,17 @@ function profile(bezel: number, thickness: number, cap: number): { samples: Floa
     const surface = (1 - (1 - t) ** 4) ** 0.25;
     const incident = Math.atan((1 - t) ** 3 / surface ** 3);
     const refracted = Math.asin(Math.sin(incident) / 1.5);
-    samples[i] = Math.min(cap, Math.tan(incident - refracted) * (thickness + surface * bezel));
+    samples[i] = Math.tan(incident - refracted) * (thickness + surface * bezel);
     maximum = Math.max(maximum, samples[i]!);
   }
   return { samples, maximum };
 }
 
-function maps(width: number, height: number, radius: number, selection: boolean) {
+function maps(width: number, height: number, radius: number, selection: boolean, shape: Shape) {
   const density = Math.min(devicePixelRatio || 1, 2);
-  const bezel = clamp(Math.min(width, height) * 0.12, 4, 10);
-  const thickness = clamp(Math.min(width, height) * 0.2, 8, 24);
-  const { samples, maximum } = profile(bezel, thickness, selection ? 14 : Infinity);
+  const bezel = shape.bezel ?? clamp(Math.min(width, height) * 0.12, 4, 10);
+  const thickness = shape.thickness ?? clamp(Math.min(width, height) * 0.2, 8, 24);
+  const { samples, maximum } = profile(bezel, thickness);
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(width * density);
@@ -55,6 +63,8 @@ function maps(width: number, height: number, radius: number, selection: boolean)
   const context = canvas.getContext("2d")!;
   const field = context.createImageData(canvas.width, canvas.height);
   const shine = context.createImageData(canvas.width, canvas.height);
+  const magnify = shape.zoom > 1 ? context.createImageData(canvas.width, canvas.height) : undefined;
+  const reach = Math.max(width, height) / 2;
   const direction = selection ? 1 : -1;
 
   for (let y = 0; y < canvas.height; y++) {
@@ -85,6 +95,15 @@ function maps(width: number, height: number, radius: number, selection: boolean)
       field.data[i + 2] = 128;
       field.data[i + 3] = 255;
 
+      // A linear field: each point samples from closer to the centre, which
+      // enlarges the whole face evenly.
+      if (magnify) {
+        magnify.data[i] = Math.round(127.5 - (px / reach) * 127.5);
+        magnify.data[i + 1] = Math.round(127.5 - (py / reach) * 127.5);
+        magnify.data[i + 2] = 128;
+        magnify.data[i + 3] = 255;
+      }
+
       const light = -(nx + ny) * Math.SQRT1_2;
       const glint = Math.max(light, 0) ** 3;
       const reflected = Math.max(-light, 0) ** 3;
@@ -111,17 +130,22 @@ function maps(width: number, height: number, radius: number, selection: boolean)
   const displacement = canvas.toDataURL();
   context.putImageData(shine, 0, 0);
   const highlight = canvas.toDataURL();
-  return { displacement, highlight, scale: maximum * 2 };
+  let zoom: { map: string; scale: number } | undefined;
+  if (magnify) {
+    context.putImageData(magnify, 0, 0);
+    zoom = { map: canvas.toDataURL(), scale: 2 * reach * (1 - 1 / shape.zoom) };
+  }
+  return { displacement, highlight, zoom, scale: maximum * 2 * shape.level };
 }
 
 // The filter only bends the rim. Blur and the rim highlight are applied in CSS,
 // which Chromium positions correctly when it repaints part of the glass.
-function lens(width: number, height: number, radius: number, selection: boolean): Lens {
-  const key = `${width}-${height}-${radius}-${selection}`;
+function lens(width: number, height: number, radius: number, selection: boolean, shape: Shape): Lens {
+  const key = Object.values({ width, height, radius, selection, ...shape }).join("-");
   const cached = lenses.get(key);
   if (cached) return cached;
 
-  const { displacement, highlight, scale } = maps(width, height, radius, selection);
+  const { displacement, highlight, zoom, scale } = maps(width, height, radius, selection, shape);
   const id = `liquidglass-${lenses.size}`;
   const box = { x: 0, y: 0, width, height };
   const filter = svg("filter", {
@@ -158,17 +182,43 @@ function lens(width: number, height: number, radius: number, selection: boolean)
       svg("feComposite", { in: "rg", in2: "b", operator: "arithmetic", k2: 1, k3: 1 }),
     );
   } else {
+    if (zoom) {
+      filter.append(
+        svg("feImage", { href: zoom.map, ...box, preserveAspectRatio: "none", result: "zoom" }),
+        svg("feDisplacementMap", {
+          in: "SourceGraphic",
+          in2: "zoom",
+          scale: zoom.scale,
+          xChannelSelector: "R",
+          yChannelSelector: "G",
+          result: "magnified",
+        }),
+      );
+    }
     filter.append(
       svg("feDisplacementMap", {
-        in: "SourceGraphic",
+        in: zoom ? "magnified" : "SourceGraphic",
         in2: "field",
         scale,
         xChannelSelector: "R",
         yChannelSelector: "G",
         result: "displaced",
       }),
-      svg("feColorMatrix", { in: "displaced", type: "saturate", values: 1.5 }),
+      svg("feColorMatrix", { in: "displaced", type: "saturate", values: 1.5, result: "face" }),
     );
+    // Along the rim highlight, show the bent backdrop far more saturated, so
+    // strong edges break into colour where they cross it.
+    if (shape.saturation > 1) {
+      const mask = svg("feComponentTransfer", { in: "shine", result: "mask" });
+      mask.append(svg("feFuncA", { type: "linear", slope: 1.8 }));
+      filter.append(
+        svg("feColorMatrix", { in: "displaced", type: "saturate", values: shape.saturation, result: "vivid" }),
+        svg("feImage", { href: highlight, ...box, preserveAspectRatio: "none", result: "shine" }),
+        mask,
+        svg("feComposite", { in: "vivid", in2: "mask", operator: "in", result: "edge" }),
+        svg("feBlend", { in: "edge", in2: "face", mode: "normal" }),
+      );
+    }
   }
   container().append(filter);
 
@@ -181,13 +231,25 @@ function fit(element: HTMLElement, selection: boolean): void {
   const width = element.offsetWidth;
   const height = element.offsetHeight;
   if (!width || !height) return;
-  const corner = getComputedStyle(element).borderTopLeftRadius;
+  const style = getComputedStyle(element);
+  const corner = style.borderTopLeftRadius;
   const radius = Math.min(
     width / 2,
     height / 2,
     corner.endsWith("%") ? (Math.min(width, height) * parseFloat(corner)) / 100 : parseFloat(corner),
   );
-  const { filter, rim } = lens(width, height, radius, selection);
+  const length = (name: string) => {
+    const value = parseFloat(style.getPropertyValue(name));
+    return Number.isFinite(value) ? value : undefined;
+  };
+  const shape = {
+    bezel: length("--lg-bezel"),
+    thickness: length("--lg-thickness"),
+    level: length("--lg-refraction") ?? 1,
+    zoom: Math.max(1, length("--lg-zoom") ?? 1),
+    saturation: Math.max(1, length("--lg-rim-saturation") ?? 1),
+  };
+  const { filter, rim } = lens(width, height, radius, selection, shape);
   element.style.setProperty("--lg-filter", filter);
   element.style.setProperty("--lg-rim", rim);
 }
@@ -201,24 +263,27 @@ function whenIdle(callback: () => void): () => void {
   return () => clearTimeout(handle);
 }
 
-/**
- * Refracts the backdrop through glass surfaces in Chromium browsers. Other
- * browsers keep the blur. Call once on the client, before glass renders.
- */
-export function enableRefraction(): void {
-  if (typeof navigator === "undefined" || !/Chrom(?:e|ium)\//.test(navigator.userAgent)) return;
-  register((element, selection) => {
-    let cancel: (() => void) | undefined;
-    const observer = new ResizeObserver(() => {
-      cancel?.();
-      cancel = whenIdle(() => fit(element, selection));
-    });
-    observer.observe(element);
-    return () => {
-      cancel?.();
-      observer.disconnect();
-      element.style.removeProperty("--lg-filter");
-      element.style.removeProperty("--lg-rim");
-    };
+// Only Chromium applies SVG filters to a backdrop; elsewhere the glass keeps its blur.
+const supported = () => /Chrom(?:e|ium)\//.test(navigator.userAgent);
+
+function refract(element: HTMLElement, selection: boolean): () => void {
+  let cancel: (() => void) | undefined;
+  const observer = new ResizeObserver(() => {
+    cancel?.();
+    cancel = whenIdle(() => fit(element, selection));
   });
+  observer.observe(element);
+  return () => {
+    cancel?.();
+    observer.disconnect();
+    element.style.removeProperty("--lg-filter");
+    element.style.removeProperty("--lg-rim");
+  };
+}
+
+export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false): void {
+  useEffect(() => {
+    const element = ref.current;
+    if (element && supported()) return refract(element, selection);
+  }, [ref, selection]);
 }

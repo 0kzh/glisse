@@ -23,3 +23,18 @@ test("forwards its ref and props", () => {
   expect(ref.current?.className).toBe("lg-glass lg-button extra");
   expect(ref.current?.disabled).toBe(true);
 });
+
+test("marks its variant and destructive role", () => {
+  render(
+    <>
+      <Button>Glass</Button>
+      <Button variant="prominent" destructive>Delete</Button>
+    </>,
+  );
+  const glass = screen.getByRole("button", { name: "Glass" });
+  const remove = screen.getByRole("button", { name: "Delete" });
+  expect(glass.hasAttribute("data-variant")).toBe(false);
+  expect(glass.hasAttribute("data-destructive")).toBe(false);
+  expect(remove.dataset.variant).toBe("prominent");
+  expect(remove.dataset.destructive).toBe("");
+});

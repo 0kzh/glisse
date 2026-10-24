@@ -1,8 +1,8 @@
 # liquidglass
 
-Liquid Glass controls for React: a button, tab bar, search field, switch, slider and menu that press, stretch and settle on springs.
+Liquid Glass controls for React: a button, tab bar, search field, switch, slider and menu that press, stretch and settle on springs, and refract what's behind them in Chromium.
 
-No dependencies beyond React 18. About 6 kB gzipped for all six, and each one tree-shakes on its own.
+No dependencies beyond React 18. About 8 kB gzipped for everything, and each component tree-shakes on its own.
 
 [Live demo](https://kelvinzhang.com/playground/liquid-glass)
 
@@ -29,14 +29,18 @@ Every stateful component works controlled (`value` + `onValueChange`, or `checke
 
 ```tsx
 <Button icon={<ShareIcon />} aria-label="Share" />
-<Button>Continue</Button>
+<Button>Cancel</Button>
+<Button variant="prominent">Continue</Button>
+<Button variant="prominent" destructive>Delete</Button>
 ```
 
-An icon on its own makes a 40px circle. It accepts every `<button>` prop.
+An icon on its own makes a 40px circle. Use `prominent` for the one primary action in a view; it fills with `--lg-fill`. `destructive` turns a glass button's label red and a prominent button's fill red. It accepts every `<button>` prop.
 
-| Prop   | Type        | Default |
-| ------ | ----------- | ------- |
-| `icon` | `ReactNode` |         |
+| Prop          | Type                     | Default   |
+| ------------- | ------------------------ | --------- |
+| `icon`        | `ReactNode`              |           |
+| `variant`     | `"glass" \| "prominent"` | `"glass"` |
+| `destructive` | `boolean`                | `false`   |
 
 ## TabBar
 
@@ -81,7 +85,7 @@ import Link from "next/link";
 | `onValueChange` | `(value: string) => void` |         |
 | `link`          | `ElementType`             | `"a"`   |
 
-`TabBarItem` is `{ value: string; label: ReactNode; href?: string }`. Set the tab size with `--lg-tab-width` (84px) and `--lg-tab-height` (32px).
+`TabBarItem` is `{ value: string; label: ReactNode; href?: string }`. Set the tab size with `--lg-tab-width` (84px) and `--lg-tab-height` (32px). While a tab is held, the selection grows by `--lg-lens-grow-x` (27px) and `--lg-lens-grow-y` (20px).
 
 ## SearchField
 
@@ -147,7 +151,7 @@ A native range input sits on top, so keyboard, stepping and assistive technology
 />
 ```
 
-Press and drag across the rows: one highlight follows the pointer, and releasing chooses. Escape closes, and arrow keys move between items.
+The menu grows out of its button and shrinks back into it, as on iOS. One highlight glides between the rows as you hover, or press and drag across them and release to choose. Escape closes, and arrow keys move between items.
 
 | Prop         | Type                 | Default    |
 | ------------ | -------------------- | ---------- |
@@ -157,6 +161,14 @@ Press and drag across the rows: one highlight follows the pointer, and releasing
 | `align`      | `"start" \| "end"`   | `"end"`    |
 
 `MenuEntry` is `"separator"` or `{ label: ReactNode; icon?: ReactNode; onSelect?: () => void; destructive?: boolean; disabled?: boolean }`.
+
+## Glass
+
+```tsx
+<Glass className="card">…</Glass>
+```
+
+A plain glass surface for anything else, such as a card. It renders a `<div>` and accepts every prop one does.
 
 ## Theming
 
@@ -178,21 +190,34 @@ Colours are CSS variables on `:root`, so you can override any of them:
 | `--lg-glass-active` | Hovered, pressed and focused glass |
 | `--lg-surface`      | Menu                               |
 | `--lg-on`           | Switch when on                     |
-| `--lg-fill`         | Slider fill                        |
-| `--lg-track`        | Switch and slider tracks           |
-| `--lg-destructive`  | Destructive menu items             |
+| `--lg-fill`         | Slider fill, prominent buttons     |
+| `--lg-track`        | Switch track                       |
+| `--lg-rail`         | Slider track                       |
+| `--lg-destructive`  | Destructive buttons and menu items |
 
 ## Refraction
 
-Glass is blurred by default. In Chromium browsers it can refract the backdrop through a curved rim as well. This lives in a separate entry, so it costs nothing unless you import it.
+In Chromium browsers, glass refracts the backdrop through a curved rim, with nothing to set up. Safari and Firefox can't filter a backdrop through SVG, so there the glass keeps its blur.
+
+The curved rim is `--lg-bezel` wide and the glass `--lg-thickness` deep, both sized from the element by default. A bezel as wide as the radius bends the whole face, like a magnifying glass. `--lg-refraction` (1) scales how far the rim bends.
+
+Two more variables turn glass into a lens. `--lg-zoom` (1) magnifies what's behind it, and `--lg-rim-saturation` (1) saturates the backdrop where it crosses the rim highlight, so strong edges break into colour. For a clear lens, drop the tint and keep only the refraction, as below.
 
 ```tsx
-import { enableRefraction } from "liquidglass/refraction";
-
-enableRefraction();
+<Glass
+  style={{
+    width: 210,
+    height: 150,
+    borderRadius: 75,
+    background: "none",
+    backdropFilter: "var(--lg-filter, blur(3px))",
+    "--lg-bezel": "25px",
+    "--lg-thickness": "50px",
+    "--lg-zoom": 1.13,
+    "--lg-rim-saturation": 9,
+  }}
+/>
 ```
-
-Call it once on the client before the controls render. Other browsers keep the blur.
 
 ## Acknowledgements
 
