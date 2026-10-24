@@ -1,6 +1,6 @@
 {
   "name": "glisse",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Liquid Glass controls for React, with spring animations and real refraction.",
   "keywords": [
     "react",
