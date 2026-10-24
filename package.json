@@ -16,6 +16,11 @@
   "license": "MIT",
   "author": "Kelvin Zhang <me@kelvinzhang.ca>",
   "homepage": "https://kelvinzhang.com/playground/liquid-glass",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0kzh/liquidglass.git"
+  },
+  "bugs": "https://github.com/0kzh/liquidglass/issues",
   "type": "module",
   "sideEffects": [
     "*.css"
