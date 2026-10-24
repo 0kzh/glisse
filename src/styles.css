@@ -105,24 +105,18 @@
 /* Glass refracting a copy of its backdrop, where the live one can't be filtered */
 
 .lg-glass[data-copy] {
-  overflow: hidden;
-  isolation: isolate;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
 
-.lg-glass-copy,
-.lg-glass-skin {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
 .lg-glass-copy {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
   overflow: hidden;
-  filter: blur(var(--lg-blur, 3px)) var(--lg-filter, saturate(1.5));
+  transform-origin: 0 0;
+  pointer-events: none;
 }
 
 .lg-glass-copy > div {
@@ -130,12 +124,6 @@
   top: 0;
   left: 0;
   transform-origin: 0 0;
-}
-
-/* The glass's own tint, rim and inner shadows, drawn again over the copy. */
-.lg-glass-skin {
-  background: inherit;
-  box-shadow: inherit;
 }
 
 /* Button */

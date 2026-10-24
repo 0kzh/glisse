@@ -230,7 +230,7 @@ function lens(width: number, height: number, radius: number, selection: boolean,
   return result;
 }
 
-function fit(element: HTMLElement, selection: boolean): void {
+function fit(element: HTMLElement, selection: boolean, filtered: boolean): void {
   const width = element.offsetWidth;
   const height = element.offsetHeight;
   if (!width || !height) return;
@@ -253,7 +253,7 @@ function fit(element: HTMLElement, selection: boolean): void {
     saturation: Math.max(1, length("--lg-rim-saturation") ?? 1),
   };
   const { filter, rim } = lens(width, height, radius, selection, shape);
-  element.style.setProperty("--lg-filter", filter);
+  if (filtered) element.style.setProperty("--lg-filter", filter);
   element.style.setProperty("--lg-rim", rim);
 }
 
@@ -269,11 +269,14 @@ function whenIdle(callback: () => void): () => void {
 /** Only Chromium applies SVG filters to the live backdrop. */
 export const refractsBackdrop = (): boolean => /Chrom(?:e|ium)\//.test(navigator.userAgent);
 
-function refract(element: HTMLElement, selection: boolean): () => void {
+// Refits the lens whenever the element changes size. Unfiltered, it sets only
+// the rim highlight: the nearest Safari and Firefox come to refraction over
+// content they have no copy of.
+function refract(element: HTMLElement, selection: boolean, filtered: boolean): () => void {
   let cancel: (() => void) | undefined;
   const observer = new ResizeObserver(() => {
     cancel?.();
-    cancel = whenIdle(() => fit(element, selection));
+    cancel = whenIdle(() => fit(element, selection, filtered));
   });
   observer.observe(element);
   return () => {
@@ -284,14 +287,210 @@ function refract(element: HTMLElement, selection: boolean): () => void {
   };
 }
 
+const MARK = "data-glisse-backdrop";
+
+// The part of an element that can be seen, cut down by every ancestor that
+// clips its overflow (a large image inside a small scroller shows only the scroller).
+function visibleBox(element: HTMLElement): DOMRect {
+  let { left, top, right, bottom } = element.getBoundingClientRect();
+  for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (!/hidden|clip|auto|scroll/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) continue;
+    const clip = node.getBoundingClientRect();
+    left = Math.max(left, clip.left);
+    top = Math.max(top, clip.top);
+    right = Math.min(right, clip.right);
+    bottom = Math.min(bottom, clip.bottom);
+  }
+  return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+}
+
+/** The marked content behind the glass: the closest one whose visible part it overlaps. */
+function findBackdrop(element: HTMLElement): HTMLElement | null {
+  const box = element.getBoundingClientRect();
+  const behind = (candidate: HTMLElement) => {
+    if (candidate.contains(element) || element.contains(candidate)) return false;
+    const other = visibleBox(candidate);
+    return other.left < box.right && other.right > box.left && other.top < box.bottom && other.bottom > box.top;
+  };
+  for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+    const found = [...node.querySelectorAll<HTMLElement>(`[${MARK}]`)].find(behind);
+    if (found) return found;
+  }
+  return null;
+}
+
+// A deep copy that renders like the original wherever it's placed: each
+// element carries its computed style inline, minus anything that would animate
+// it or tie it to the original.
+function copyOf(source: HTMLElement): HTMLElement {
+  const copy = source.cloneNode(true) as HTMLElement;
+  const originals = [source, ...source.querySelectorAll<HTMLElement>("*")];
+  const copies = [copy, ...copy.querySelectorAll<HTMLElement>("*")];
+  originals.forEach((original, index) => {
+    const target = copies[index];
+    if (!target) return;
+    const computed = getComputedStyle(original);
+    for (let i = 0; i < computed.length; i++) {
+      const name = computed[i]!;
+      target.style.setProperty(name, computed.getPropertyValue(name));
+    }
+    target.style.transition = target.style.animation = "none";
+    target.style.setProperty("view-transition-name", "none");
+    target.removeAttribute("id");
+  });
+  copy.removeAttribute(MARK);
+  Object.assign(copy.style, {
+    position: "absolute",
+    top: "0",
+    left: "0",
+    margin: "0",
+    transform: "none",
+    translate: "none",
+    scale: "none",
+    rotate: "none",
+    width: `${source.offsetWidth}px`,
+    height: `${source.offsetHeight}px`,
+  });
+  return copy;
+}
+
+// Where the live backdrop can't be filtered, a copy of the marked content is
+// filtered instead, in a layer laid just behind the glass and matched to its
+// box. The glass then paints its tint, rim and shadows over it, as it would
+// over the live backdrop.
+function copyBackdrop(element: HTMLElement, source: HTMLElement): () => void {
+  const layer = document.createElement("div");
+  const frame = document.createElement("div");
+  layer.className = "lg-glass-copy";
+  layer.setAttribute("aria-hidden", "true");
+  layer.setAttribute("inert", "");
+  layer.append(frame);
+  element.before(layer);
+  element.setAttribute("data-copy", "");
+
+  // The layer is a sibling, so it copies the glass's filter, shape and
+  // opacity rather than inheriting them. Checked every frame so transitions
+  // on the glass carry over.
+  const style = getComputedStyle(element);
+  let styled = "";
+  const restyle = () => {
+    const blur = style.getPropertyValue("--lg-blur").trim() || "3px";
+    const filter = style.getPropertyValue("--lg-filter").trim() || "saturate(1.5)";
+    const next = [`blur(${blur}) ${filter}`, style.borderRadius, style.opacity, style.visibility];
+    if (next.join("|") === styled) return;
+    styled = next.join("|");
+    layer.style.filter = next[0]!;
+    layer.style.borderRadius = next[1]!;
+    layer.style.clipPath = `inset(0 round ${next[1]})`;
+    layer.style.opacity = next[2]!;
+    layer.style.visibility = next[3]!;
+  };
+
+  let placed = "";
+  let shift = { x: 0, y: 0 };
+  const align = () => {
+    const width = element.offsetWidth;
+    const height = element.offsetHeight;
+    if (!width || !height || !source.offsetWidth || !source.offsetHeight) {
+      layer.style.display = "none";
+      return;
+    }
+    layer.style.display = "";
+    const box = element.getBoundingClientRect();
+    const from = source.getBoundingClientRect();
+    const at = layer.getBoundingClientRect();
+    const sx = box.width / width;
+    const sy = box.height / height;
+    // The layer's untransformed origin, recovered from where it sits now.
+    const x = box.left - (at.left - shift.x);
+    const y = box.top - (at.top - shift.y);
+    const next = [
+      width,
+      height,
+      `translate(${x}px, ${y}px) scale(${sx}, ${sy})`,
+      `translate(${(from.left - box.left) / sx}px, ${(from.top - box.top) / sy}px) scale(${
+        from.width / source.offsetWidth / sx
+      }, ${from.height / source.offsetHeight / sy})`,
+    ].join("|");
+    if (next === placed) return;
+    placed = next;
+    shift = { x, y };
+    layer.style.width = `${width}px`;
+    layer.style.height = `${height}px`;
+    layer.style.transform = `translate(${x}px, ${y}px) scale(${sx}, ${sy})`;
+    frame.style.transform = next.split("|")[3]!;
+  };
+
+  let refresh = 0;
+  const recopy = () => {
+    refresh = 0;
+    frame.replaceChildren(copyOf(source));
+    placed = "";
+    align();
+  };
+  const schedule = () => {
+    refresh ||= requestAnimationFrame(recopy);
+  };
+  restyle();
+  recopy();
+
+  // Moving or restyling the glass realigns before the frame is drawn, so the
+  // copy never trails it. Scrolls and resizes realign as they happen, and a
+  // per-frame check catches anything else that moves either one.
+  const moved = new MutationObserver(() => {
+    restyle();
+    align();
+  });
+  moved.observe(element, { attributes: true, attributeFilter: ["style", "class", "disabled"] });
+  const changed = new MutationObserver(schedule);
+  changed.observe(source, { attributes: true, childList: true, characterData: true, subtree: true });
+  const resized = new ResizeObserver(schedule);
+  resized.observe(source);
+  source.addEventListener("load", schedule, true);
+  source.addEventListener("transitionend", schedule);
+  document.addEventListener("scroll", align, { capture: true, passive: true });
+  window.addEventListener("resize", align);
+  let tick = 0;
+  const loop = () => {
+    restyle();
+    align();
+    tick = requestAnimationFrame(loop);
+  };
+  tick = requestAnimationFrame(loop);
+
+  return () => {
+    cancelAnimationFrame(tick);
+    cancelAnimationFrame(refresh);
+    moved.disconnect();
+    changed.disconnect();
+    resized.disconnect();
+    source.removeEventListener("load", schedule, true);
+    source.removeEventListener("transitionend", schedule);
+    document.removeEventListener("scroll", align, { capture: true });
+    window.removeEventListener("resize", align);
+    layer.remove();
+    element.removeAttribute("data-copy");
+  };
+}
+
 /**
- * Fits a lens filter to the element and exposes it as `--lg-filter`. Glass
- * applies it to the live backdrop in Chromium; elsewhere it keeps its blur,
- * unless `copied` says it carries a copy of its backdrop to filter instead.
+ * Refracts what's behind the element. Chromium filters the live backdrop.
+ * Safari and Firefox filter a copy of content marked `data-glisse-backdrop`
+ * nearby, and otherwise keep the blur with the rim highlight.
  */
-export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false, copied = false): void {
+export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false): void {
   useEffect(() => {
     const element = ref.current;
-    if (element && (copied || refractsBackdrop())) return refract(element, selection);
-  }, [ref, selection, copied]);
+    if (!element) return;
+    if (refractsBackdrop()) return refract(element, selection, true);
+    const source = selection ? null : findBackdrop(element);
+    if (!source) return refract(element, selection, false);
+    const stop = copyBackdrop(element, source);
+    const unfit = refract(element, selection, true);
+    return () => {
+      unfit();
+      stop();
+    };
+  }, [ref, selection]);
 }

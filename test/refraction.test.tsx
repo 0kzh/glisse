@@ -18,8 +18,9 @@ test("refracts in Chromium with no setup", () => {
   expect(observe).toHaveBeenCalledOnce();
 });
 
-test("keeps the blur in other browsers", () => {
+test("keeps the blur in other browsers, fitting only the rim highlight", () => {
   const observe = browse("Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15");
-  render(<Button>Continue</Button>);
-  expect(observe).not.toHaveBeenCalled();
+  const { getByRole } = render(<Button>Continue</Button>);
+  expect(observe).toHaveBeenCalledOnce();
+  expect(getByRole("button").hasAttribute("data-copy")).toBe(false);
 });

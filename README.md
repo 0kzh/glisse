@@ -178,12 +178,6 @@ The menu grows out of its button and shrinks back into it, as on iOS. One highli
 
 A plain glass surface for anything else, such as a card. It renders a `<div>` and accepts every prop one does.
 
-| Prop       | Type        | Default |
-| ---------- | ----------- | ------- |
-| `backdrop` | `ReactNode` |         |
-
-`backdrop` is a copy of what sits behind the glass, laid out to fill the glass's positioned parent. It lets Safari and Firefox refract too: see [Refraction](#refraction).
-
 ## Styles
 
 Glisse adds its stylesheet to the page the first time it loads in the browser. It goes at the start of `<head>`, so your own CSS still wins ties.
@@ -224,18 +218,20 @@ Colours are CSS variables on `:root`, so you can override any of them:
 
 ## Refraction
 
-In Chromium browsers, glass refracts the backdrop through a curved rim, with nothing to set up. Safari and Firefox can't filter the live backdrop through SVG, so there the glass keeps its blur.
+In Chromium browsers, glass refracts the backdrop through a curved rim, with nothing to set up. Safari and Firefox can't filter the live backdrop through SVG, so there glass keeps its blur and rim highlight.
 
-To refract in Safari and Firefox as well, give a `Glass` a copy of what's behind it. Render the same content as `backdrop`, sized to fill the glass's positioned parent, just as the original does. Those browsers then refract the copy, kept lined up with the original as the glass moves, scrolls or scales; Chromium ignores it and keeps refracting the live page.
+To refract in Safari and Firefox as well, mark the content behind the glass with `data-glisse-backdrop`. Glass over it then refracts a copy, laid just behind the glass and kept lined up with the original as either one moves, scrolls or scales. The copy is taken again when the content changes, resizes or loads an image, but animation, video and canvas don't carry over. Chromium ignores the mark and keeps refracting the live page.
 
 ```tsx
 <div style={{ position: "relative" }}>
-  <Photo />
-  <Glass backdrop={<Photo />} style={{ position: "absolute", left: 40, top: 40, width: 160, height: 160, borderRadius: 80 }} />
+  <div data-glisse-backdrop>
+    <Photo />
+  </div>
+  <Glass style={{ position: "absolute", left: 40, top: 40, width: 160, height: 160, borderRadius: 80 }} />
 </div>
 ```
 
-Controls over arbitrary page content, such as a navigation bar, can't carry a copy, so they keep the blur there.
+Mark the smallest element that covers what's behind the glass, since all of it is copied. Glass over unmarked content, such as a navigation bar over the page, keeps the blur.
 
 The curved rim is `--lg-bezel` wide and the glass `--lg-thickness` deep, both sized from the element by default. A bezel as wide as the radius bends the whole face, like a magnifying glass. `--lg-refraction` (1) scales how far the rim bends.
 
