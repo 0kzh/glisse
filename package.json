@@ -1,7 +1,7 @@
 {
   "name": "glisse",
   "version": "0.4.2",
-  "description": "Liquid Glass controls for React, with spring animations and real refraction.",
+  "description": "A faithful implementation of Apple's Liquid Glass for the web.",
   "keywords": [
     "react",
     "liquid glass",
@@ -15,7 +15,7 @@
   ],
   "license": "MIT",
   "author": "Kelvin Zhang <me@kelvinzhang.ca>",
-  "homepage": "https://kelvinzhang.com/playground/liquid-glass",
+  "homepage": "https://glisse.kelvinzhang.ca",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/0kzh/glisse.git"
