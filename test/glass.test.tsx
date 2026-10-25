@@ -49,6 +49,43 @@ test("refracts a copy of the marked backdrop where the live one can't be filtere
   expect(screen.getByText("On top")).toBeTruthy();
 });
 
+test("restyles the copy when a theme set further up changes", async () => {
+  browse(safari);
+  place(20, 20);
+  const style = document.createElement("style");
+  style.textContent = '[data-theme="dark"] .label { color: rgb(255, 0, 0); }';
+  document.head.append(style);
+  const { container } = render(
+    <div data-theme="light">
+      <div data-glisse-backdrop>
+        <span className="label">Behind</span>
+      </div>
+      <Glass data-testid="glass" />
+    </div>,
+  );
+  const copied = () => screen.getByTestId("glass").previousElementSibling!.querySelector<HTMLElement>(".label")!;
+  expect(copied().style.color).not.toBe("rgb(255, 0, 0)");
+
+  (container.firstElementChild as HTMLElement).dataset.theme = "dark";
+  await new Promise((resolve) => setTimeout(resolve));
+  expect(copied().style.color).toBe("rgb(255, 0, 0)");
+  style.remove();
+});
+
+test("copies the marked backdrop again when its content changes", async () => {
+  browse(safari);
+  place(20, 20);
+  render(
+    <div>
+      <p data-glisse-backdrop>Before</p>
+      <Glass data-testid="glass" />
+    </div>,
+  );
+  document.querySelector("[data-glisse-backdrop]")!.textContent = "After";
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(screen.getByTestId("glass").previousElementSibling?.textContent).toBe("After");
+});
+
 test("ignores marked content that isn't behind the glass", () => {
   browse(safari);
   place(500, 500);

@@ -320,40 +320,94 @@ function findBackdrop(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
+// A copy never animates on its own (it follows the original instead), and its
+// root is placed by the layer rather than where the original sits.
+const STILL = /^(transition|animation|view-transition)/;
+const PLACED: Record<string, string> = {
+  position: "absolute",
+  top: "0px",
+  left: "0px",
+  right: "auto",
+  bottom: "auto",
+  "margin-top": "0px",
+  "margin-right": "0px",
+  "margin-bottom": "0px",
+  "margin-left": "0px",
+  transform: "none",
+  translate: "none",
+  scale: "none",
+  rotate: "none",
+};
+
+const kebab = (name: string) => (name.startsWith("--") ? name : name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`));
+
+interface Copy {
+  root: HTMLElement;
+  /** Each element of the original, with its copy. */
+  pairs: Map<Element, HTMLElement>;
+}
+
+// Writes an element's computed style onto its copy: every property, or only
+// the named ones.
+function inline(original: Element, copy: HTMLElement, root: boolean, names?: Iterable<string>): void {
+  const computed = getComputedStyle(original);
+  const write = (name: string) => {
+    if (STILL.test(name) || (root && (name in PLACED || name === "width" || name === "height"))) return;
+    const value = computed.getPropertyValue(name);
+    if (copy.style.getPropertyValue(name) !== value) copy.style.setProperty(name, value);
+  };
+  if (names) for (const name of names) write(name);
+  else for (let i = 0; i < computed.length; i++) write(computed[i]!);
+  if (!root) return;
+  for (const [name, value] of Object.entries(PLACED)) copy.style.setProperty(name, value);
+  copy.style.width = `${(original as HTMLElement).offsetWidth}px`;
+  copy.style.height = `${(original as HTMLElement).offsetHeight}px`;
+}
+
 // A deep copy that renders like the original wherever it's placed: each
 // element carries its computed style inline, minus anything that would animate
 // it or tie it to the original.
-function copyOf(source: HTMLElement): HTMLElement {
-  const copy = source.cloneNode(true) as HTMLElement;
-  const originals = [source, ...source.querySelectorAll<HTMLElement>("*")];
-  const copies = [copy, ...copy.querySelectorAll<HTMLElement>("*")];
+function copyOf(source: HTMLElement): Copy {
+  const root = source.cloneNode(true) as HTMLElement;
+  const originals = [source, ...source.querySelectorAll("*")];
+  const copies = [root, ...root.querySelectorAll<HTMLElement>("*")];
+  const pairs = new Map<Element, HTMLElement>();
   originals.forEach((original, index) => {
-    const target = copies[index];
-    if (!target) return;
-    const computed = getComputedStyle(original);
-    for (let i = 0; i < computed.length; i++) {
-      const name = computed[i]!;
-      target.style.setProperty(name, computed.getPropertyValue(name));
-    }
-    target.style.transition = target.style.animation = "none";
-    target.style.setProperty("view-transition-name", "none");
-    target.removeAttribute("id");
+    const copy = copies[index];
+    if (!copy) return;
+    pairs.set(original, copy);
+    copy.removeAttribute("id");
+    // Detached, a lazy image would never load.
+    if (copy instanceof HTMLImageElement) copy.loading = "eager";
+    copy.style.transition = copy.style.animation = "none";
+    copy.style.setProperty("view-transition-name", "none");
+    inline(original, copy, original === source);
   });
-  copy.removeAttribute(MARK);
-  Object.assign(copy.style, {
-    position: "absolute",
-    top: "0",
-    left: "0",
-    margin: "0",
-    transform: "none",
-    translate: "none",
-    scale: "none",
-    rotate: "none",
-    width: `${source.offsetWidth}px`,
-    height: `${source.offsetHeight}px`,
-  });
-  return copy;
+  root.removeAttribute(MARK);
+  return { root, pairs };
 }
+
+const TIMING = new Set(["offset", "computedOffset", "easing", "composite"]);
+
+// The properties that each running transition or animation in the original
+// is changing, by element.
+function animating(source: HTMLElement): Map<Element, Set<string>> {
+  const found = new Map<Element, Set<string>>();
+  if (typeof source.getAnimations !== "function") return found;
+  for (const animation of source.getAnimations({ subtree: true })) {
+    const effect = animation.effect as KeyframeEffect | null;
+    if (!effect?.target || effect.pseudoElement) continue;
+    const names = found.get(effect.target) ?? new Set<string>();
+    if ("transitionProperty" in animation) names.add(String(animation.transitionProperty));
+    else
+      for (const keyframe of effect.getKeyframes())
+        for (const key of Object.keys(keyframe)) if (!TIMING.has(key)) names.add(kebab(key));
+    found.set(effect.target, names);
+  }
+  return found;
+}
+
+const SOURCE = new Set(["src", "srcset", "sizes"]);
 
 // Where the live backdrop can't be filtered, a copy of the marked content is
 // filtered instead, in a layer laid just behind the glass and matched to its
@@ -422,18 +476,54 @@ function copyBackdrop(element: HTMLElement, source: HTMLElement): () => void {
     frame.style.transform = next.split("|")[3]!;
   };
 
-  let refresh = 0;
-  const recopy = () => {
-    refresh = 0;
-    frame.replaceChildren(copyOf(source));
+  let copy = copyOf(source);
+  frame.append(copy.root);
+  let stopped = false;
+
+  // Restyles the copy in place, for anything that changes how the original
+  // looks without changing what it holds.
+  const follow = () => {
+    for (const [original, target] of copy.pairs) inline(original, target, original === source);
     placed = "";
     align();
+  };
+
+  // Takes a new copy when the original's content changes, keeping the old one
+  // up until the new one's images can paint.
+  let refresh = 0;
+  let version = 0;
+  const recopy = () => {
+    refresh = 0;
+    const next = copyOf(source);
+    const id = ++version;
+    const images = [...next.root.querySelectorAll("img")];
+    if (next.root instanceof HTMLImageElement) images.push(next.root);
+    void Promise.all(
+      images.map((image) => (typeof image.decode === "function" ? image.decode().catch(() => undefined) : undefined)),
+    ).then(() => {
+      if (stopped || id !== version) return;
+      frame.replaceChildren(next.root);
+      copy = next;
+      placed = "";
+      align();
+    });
   };
   const schedule = () => {
     refresh ||= requestAnimationFrame(recopy);
   };
-  restyle();
-  recopy();
+
+  // Transitions and animations in the original play in the copy too: each
+  // frame, whatever they're changing is copied across, and once more after
+  // they finish so the copy settles where the original does.
+  let moving = new Map<Element, Set<string>>();
+  const animate = () => {
+    const now = animating(source);
+    for (const [original, names] of new Map([...moving, ...now])) {
+      const target = copy.pairs.get(original);
+      if (target) inline(original, target, original === source, names);
+    }
+    moving = now;
+  };
 
   // Moving or restyling the glass realigns before the frame is drawn, so the
   // copy never trails it. Scrolls and resizes realign as they happen, and a
@@ -443,30 +533,58 @@ function copyBackdrop(element: HTMLElement, source: HTMLElement): () => void {
     align();
   });
   moved.observe(element, { attributes: true, attributeFilter: ["style", "class", "disabled"] });
-  const changed = new MutationObserver(schedule);
+  const changed = new MutationObserver((records) => {
+    let content = false;
+    for (const record of records) {
+      const name = record.attributeName;
+      if (record.type !== "attributes" || SOURCE.has(name!)) {
+        content = true;
+        continue;
+      }
+      const target = copy.pairs.get(record.target as Element);
+      if (!target || name === "id" || name === "style" || name === MARK) continue;
+      const value = (record.target as Element).getAttribute(name!);
+      if (value === null) target.removeAttribute(name!);
+      else target.setAttribute(name!, value);
+    }
+    if (content) schedule();
+    follow();
+  });
   changed.observe(source, { attributes: true, childList: true, characterData: true, subtree: true });
-  const resized = new ResizeObserver(schedule);
+  // A theme or state set further up, such as data-theme on the page, restyles
+  // the original without touching it.
+  const context = new MutationObserver(follow);
+  for (let node = source.parentElement; node; node = node.parentElement) context.observe(node, { attributes: true });
+  const scheme = matchMedia("(prefers-color-scheme: dark)");
+  scheme.addEventListener("change", follow);
+  const resized = new ResizeObserver(follow);
   resized.observe(source);
-  source.addEventListener("load", schedule, true);
-  source.addEventListener("transitionend", schedule);
+  source.addEventListener("load", follow, true);
+  source.addEventListener("transitionend", follow);
   document.addEventListener("scroll", align, { capture: true, passive: true });
   window.addEventListener("resize", align);
+  restyle();
+  align();
   let tick = 0;
   const loop = () => {
     restyle();
+    animate();
     align();
     tick = requestAnimationFrame(loop);
   };
   tick = requestAnimationFrame(loop);
 
   return () => {
+    stopped = true;
     cancelAnimationFrame(tick);
     cancelAnimationFrame(refresh);
     moved.disconnect();
     changed.disconnect();
+    context.disconnect();
     resized.disconnect();
-    source.removeEventListener("load", schedule, true);
-    source.removeEventListener("transitionend", schedule);
+    scheme.removeEventListener("change", follow);
+    source.removeEventListener("load", follow, true);
+    source.removeEventListener("transitionend", follow);
     document.removeEventListener("scroll", align, { capture: true });
     window.removeEventListener("resize", align);
     layer.remove();

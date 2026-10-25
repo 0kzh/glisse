@@ -220,7 +220,7 @@ Colours are CSS variables on `:root`, so you can override any of them:
 
 In Chromium browsers, glass refracts the backdrop through a curved rim, with nothing to set up. Safari and Firefox can't filter the live backdrop through SVG, so there glass keeps its blur and rim highlight.
 
-To refract in Safari and Firefox as well, mark the content behind the glass with `data-glisse-backdrop`. Glass over it then refracts a copy, laid just behind the glass and kept lined up with the original as either one moves, scrolls or scales. The copy is taken again when the content changes, resizes or loads an image, but animation, video and canvas don't carry over. Chromium ignores the mark and keeps refracting the live page.
+To refract in Safari and Firefox as well, mark the content behind the glass with `data-glisse-backdrop`. Glass over it then refracts a copy, laid just behind the glass and kept lined up with the original as either one moves, scrolls or scales. The copy keeps up with the original: style changes, including a theme set further up the page, and CSS transitions and animations carry over, and it's copied again when the content changes. Video and canvas don't carry over. Chromium ignores the mark and keeps refracting the live page.
 
 ```tsx
 <div style={{ position: "relative" }}>

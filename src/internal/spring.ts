@@ -87,7 +87,9 @@ export function createSpring(
       }
       moving.add(s);
       if (!frame) {
-        last = performance.now();
+        // Measure from the start of the current frame, so the next one
+        // already shows a frame's worth of motion.
+        last = Number(document.timeline?.currentTime ?? performance.now());
         frame = requestAnimationFrame(tick);
       }
     },

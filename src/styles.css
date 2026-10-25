@@ -99,7 +99,7 @@
 
 .lg-glass[data-pressed]::after {
   opacity: 1;
-  transition-duration: 120ms;
+  transition-duration: 0s;
 }
 
 /* Glass refracting a copy of its backdrop, where the live one can't be filtered */
@@ -141,7 +141,12 @@
   font: inherit;
   font-size: 14px;
   cursor: pointer;
+  /* A long press keeps pressing, as on iOS, rather than selecting the label. */
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
   transition: background-color 200ms ease;
 }
 
@@ -160,8 +165,10 @@
   height: 20px;
 }
 
-.lg-button:active {
+/* Lights up at once when pressed, as on iOS, and fades on release. */
+.lg-button:is(:active, [data-pressed]) {
   background-color: var(--lg-glass-active);
+  transition-duration: 0s;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -194,7 +201,7 @@
   background-color: var(--lg-button-fill);
 }
 
-.lg-button[data-variant="filled"]:active {
+.lg-button[data-variant="filled"]:is(:active, [data-pressed]) {
   background-color: color-mix(in srgb, var(--lg-button-fill) 85%, #000);
 }
 
@@ -203,7 +210,7 @@
     background-color: color-mix(in srgb, var(--lg-button-fill) 88%, #fff);
   }
 
-  .lg-button[data-variant="filled"]:hover:active {
+  .lg-button[data-variant="filled"]:hover:is(:active, [data-pressed]) {
     background-color: color-mix(in srgb, var(--lg-button-fill) 85%, #000);
   }
 }

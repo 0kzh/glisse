@@ -2,8 +2,18 @@ import { useEffect, type RefObject } from "react";
 
 import { createSpring } from "./spring";
 
-const PRESS = [417.6, 29.2] as const;
-const RELEASE = [230, 23.7] as const;
+interface Feel {
+  /** How many pixels the longer side grows while pressed. */
+  grow: number;
+  press: readonly [number, number];
+  release: readonly [number, number];
+}
+
+// A mouse press stays subtle.
+const POINTER: Feel = { grow: 6, press: [417.6, 29.2], release: [230, 23.7] };
+// A finger gets the iOS 26 glass button: it grows until its longer side is
+// about 15pt bigger, and bounces back past its resting size on release.
+const TOUCH: Feel = { grow: 15, press: [515, 27.3], release: [250, 11.8] };
 
 export function usePress(ref: RefObject<HTMLElement | null>): void {
   useEffect(() => {
@@ -16,13 +26,13 @@ export function usePress(ref: RefObject<HTMLElement | null>): void {
       el.style.translate = `${value[2]}px ${value[3]}px`;
     };
     const springs = value.map((initial, i) =>
-      createSpring(initial, ...RELEASE, (next) => {
+      createSpring(initial, ...POINTER.release, (next) => {
         value[i] = next;
         paint();
       }),
     );
 
-    let pointer: { id: number; x: number; y: number; box: DOMRect } | null = null;
+    let pointer: { id: number; x: number; y: number; box: DOMRect; feel: Feel } | null = null;
 
     const target = (next: number[], [stiffness, damping]: readonly [number, number]) => {
       springs.forEach((spring, i) => {
@@ -33,17 +43,17 @@ export function usePress(ref: RefObject<HTMLElement | null>): void {
 
     const track = (event: PointerEvent) => {
       if (!pointer) return;
-      const { box } = pointer;
+      const { box, feel } = pointer;
       el.style.setProperty("--lg-x", `${((event.clientX - box.left) / box.width) * 100}%`);
       el.style.setProperty("--lg-y", `${((event.clientY - box.top) / box.height) * 100}%`);
 
       const { width, height } = box;
-      const base = 1 + 6 / Math.max(width, height);
+      const base = 1 + feel.grow / Math.max(width, height);
       const aspect = width / height;
       const dx = (event.clientX - pointer.x) / aspect;
       const dy = event.clientY - pointer.y;
       const length = Math.hypot(dx, dy);
-      if (!length) return target([base, base, 0, 0], PRESS);
+      if (!length) return target([base, base, 0, 0], feel.press);
 
       const nx = dx / length;
       const ny = dy / length;
@@ -57,7 +67,7 @@ export function usePress(ref: RefObject<HTMLElement | null>): void {
           nx * 8 * rubber,
           ny * 8 * rubber,
         ],
-        PRESS,
+        feel.press,
       );
     };
 
@@ -67,17 +77,24 @@ export function usePress(ref: RefObject<HTMLElement | null>): void {
 
     const end = (event?: PointerEvent) => {
       if (event && event.pointerId !== pointer?.id) return;
+      const feel = pointer?.feel ?? POINTER;
       pointer = null;
       delete el.dataset.pressed;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
-      target([1, 1, 0, 0], RELEASE);
+      target([1, 1, 0, 0], feel.release);
     };
 
     const down = (event: PointerEvent) => {
       if (!event.isPrimary || event.button !== 0 || pointer || el.matches(":disabled")) return;
-      pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, box: el.getBoundingClientRect() };
+      pointer = {
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        box: el.getBoundingClientRect(),
+        feel: event.pointerType === "mouse" ? POINTER : TOUCH,
+      };
       el.dataset.pressed = "";
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", end);
