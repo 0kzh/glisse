@@ -11,6 +11,7 @@ import {
 
 import { useControllable } from "./internal/controllable";
 import { cx } from "./internal/cx";
+import { held } from "./internal/hold";
 import { useRefraction } from "./internal/refraction";
 import { createSpring } from "./internal/spring";
 
@@ -58,7 +59,7 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   let active = -1;
   let shown = false;
   let settleFrame = 0;
-  let gesture: { id: number; x: number; anchor: number; moved: boolean; box: DOMRect } | null = null;
+  let gesture: { id: number; x: number; anchor: number; moved: boolean; box: DOMRect; at: number } | null = null;
   const state = { x: 0, lift: 0 };
 
   const measure = () => {
@@ -131,7 +132,14 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
     settleFrame = 0;
     measure();
     const box = bar.getBoundingClientRect();
-    gesture = { id: event.pointerId, x: event.clientX, anchor: tabs.indexOf(tab) * slot, moved: false, box };
+    gesture = {
+      id: event.pointerId,
+      x: event.clientX,
+      anchor: tabs.indexOf(tab) * slot,
+      moved: false,
+      box,
+      at: performance.now(),
+    };
     suppressClick = false;
     bar.dataset.lifted = "";
     bar.dataset.refracting = "";
@@ -159,8 +167,10 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
     if (event.type === "lostpointercapture" && event.target !== bar) return;
     const index = Math.round(position(event) / slot);
     const { moved, box } = release()!;
-    const inside = event.type === "pointerup" && event.clientY >= box.top - 24 && event.clientY <= box.bottom + 24;
-    if (inside) {
+    // A drag selects wherever it leaves the lens, even released off the bar.
+    // A tap only counts if it ends on the bar, as with a button.
+    const near = event.clientY >= box.top - 24 && event.clientY <= box.bottom + 24;
+    if (event.type === "pointerup" && (moved || near)) {
       // Activate taps and drags at release, before settling. Waiting for the
       // browser's click briefly sends the lens back toward the old selection.
       suppressClick = true;
@@ -175,6 +185,12 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
       suppressClick = moved;
       settle();
     }
+  };
+
+  // A quick swipe that starts on the bar still scrolls the page, but a press
+  // that has rested there, or a drag already under way, keeps the touch.
+  const onTouchMove = (event: TouchEvent) => {
+    if (gesture && event.cancelable && held(gesture.at, gesture.moved)) event.preventDefault();
   };
 
   const onClick = (event: MouseEvent) => {
@@ -225,10 +241,12 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   measure();
   bar.dataset.ready = "";
   bar.addEventListener("pointerdown", onPointerDown);
-  bar.addEventListener("pointermove", onPointerMove);
-  bar.addEventListener("pointerup", onPointerEnd);
-  bar.addEventListener("pointercancel", onPointerEnd);
+  // A mouse isn't captured until it has moved, so follow it past the bar.
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerEnd);
+  window.addEventListener("pointercancel", onPointerEnd);
   bar.addEventListener("lostpointercapture", onPointerEnd);
+  bar.addEventListener("touchmove", onTouchMove, { passive: false });
   bar.addEventListener("click", onClick, true);
   bar.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibilityChange);
@@ -249,10 +267,11 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
       observer.disconnect();
       for (const key of ["ready", "hidden", "lifted", "refracting"]) delete bar.dataset[key];
       bar.removeEventListener("pointerdown", onPointerDown);
-      bar.removeEventListener("pointermove", onPointerMove);
-      bar.removeEventListener("pointerup", onPointerEnd);
-      bar.removeEventListener("pointercancel", onPointerEnd);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerEnd);
+      window.removeEventListener("pointercancel", onPointerEnd);
       bar.removeEventListener("lostpointercapture", onPointerEnd);
+      bar.removeEventListener("touchmove", onTouchMove);
       bar.removeEventListener("click", onClick, true);
       bar.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("visibilitychange", onVisibilityChange);

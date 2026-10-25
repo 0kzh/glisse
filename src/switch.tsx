@@ -10,6 +10,7 @@ import {
 
 import { useControllable } from "./internal/controllable";
 import { cx } from "./internal/cx";
+import { held } from "./internal/hold";
 import { createSpring, type Spring } from "./internal/spring";
 
 export interface SwitchProps
@@ -79,7 +80,8 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
     color.paint();
     lift.paint();
 
-    let gesture: { id: number; x: number; y: number; from: number; moved: boolean } | null = null;
+    let gesture: { id: number; x: number; y: number; from: number; moved: boolean; at: number; box: DOMRect } | null =
+      null;
     let ignoreClick = false;
 
     const sync = () => {
@@ -107,6 +109,8 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
         y: event.clientY,
         from: latest.current.checked ? 1 : 0,
         moved: false,
+        at: performance.now(),
+        box: el.getBoundingClientRect(),
       };
       el.setPointerCapture(event.pointerId);
       lift.set(1);
@@ -116,7 +120,8 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
       if (event.pointerId !== gesture?.id) return;
       const dx = event.clientX - gesture.x;
       const dy = Math.abs(event.clientY - gesture.y);
-      if (dy > 10 && dy > Math.abs(dx) + 4) {
+      // A quick vertical swipe is a scroll; once held, the switch keeps it.
+      if (!held(gesture.at, gesture.moved) && dy > 10 && dy > Math.abs(dx) + 4) {
         ignoreClick = true;
         return settle();
       }
@@ -131,8 +136,15 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
     const up = (event: PointerEvent) => {
       if (event.pointerId !== gesture?.id) return;
       ignoreClick = true;
-      const value = gesture.from + (event.clientX - gesture.x) / latest.current.travel;
-      settle(gesture.moved ? value > 0.5 : !latest.current.checked);
+      const { from, x, moved, box } = gesture;
+      const value = from + (event.clientX - x) / latest.current.travel;
+      // A drag lands where it's let go; a tap only counts on the switch.
+      const near = event.clientY >= box.top - 24 && event.clientY <= box.bottom + 24;
+      settle(moved ? value > 0.5 : near ? !latest.current.checked : undefined);
+    };
+
+    const keep = (event: TouchEvent) => {
+      if (gesture && event.cancelable && held(gesture.at, gesture.moved)) event.preventDefault();
     };
 
     const cancel = () => {
@@ -151,6 +163,7 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", cancel);
     el.addEventListener("lostpointercapture", cancel);
+    el.addEventListener("touchmove", keep, { passive: false });
     el.addEventListener("click", click);
     return () => {
       springs.current = null;
@@ -160,6 +173,7 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", cancel);
       el.removeEventListener("lostpointercapture", cancel);
+      el.removeEventListener("touchmove", keep);
       el.removeEventListener("click", click);
     };
   }, []);

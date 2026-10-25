@@ -583,6 +583,7 @@
   appearance: none;
   -webkit-appearance: none;
   touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .lg-slider input::-webkit-slider-runnable-track {
@@ -590,12 +591,20 @@
   background: transparent;
 }
 
+/* The native thumb only takes the touch; the glass thumb is drawn beneath.
+   iOS shades the native one even without its appearance, so hide it. */
 .lg-slider input::-webkit-slider-thumb {
   width: 36px;
   height: 40px;
   margin-top: -17px;
   border: 0;
   background: transparent;
+  box-shadow: none;
+  opacity: 0;
+  /* A touch on the thumb drags it rather than scrolling the page; the rest of
+     the track still scrolls. Blocking touchmove instead would stop Safari's
+     own drag. */
+  touch-action: none;
   appearance: none;
   -webkit-appearance: none;
 }
@@ -610,6 +619,8 @@
   height: 40px;
   border: 0;
   background: transparent;
+  box-shadow: none;
+  opacity: 0;
 }
 
 .lg-slider:has(input:focus-visible) .lg-slider-thumb {

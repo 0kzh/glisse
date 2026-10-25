@@ -25,3 +25,8 @@ test("passes range attributes through", () => {
   const input = screen.getByRole("slider") as HTMLInputElement;
   expect([input.min, input.max, input.step, input.disabled]).toEqual(["0", "10", "2", true]);
 });
+
+test("keeps a touch on the thumb from scrolling the page", () => {
+  const css = document.querySelector("style#glisse-styles")!.textContent!;
+  expect(css).toMatch(/\.lg-slider input::-webkit-slider-thumb\s*\{[^}]*touch-action:\s*none/);
+});

@@ -63,6 +63,57 @@ test("activates only the destination link after a touch capture handoff", () => 
   expect(month.getAttribute("aria-current")).toBe("page");
 });
 
+test("selects where a drag leaves the lens, even released off the bar", () => {
+  const { bar, day, pointer, onValueChange } = touchTabs();
+  fireEvent.pointerDown(day, pointer);
+  fireEvent.pointerMove(day, { ...pointer, clientX: 80 });
+  fireEvent.pointerMove(bar, { ...pointer, clientX: 400, clientY: 320 });
+  fireEvent.pointerUp(bar, { ...pointer, clientX: 400, clientY: 320 });
+  expect(onValueChange).toHaveBeenCalledExactlyOnceWith("month");
+  expect(screen.getByRole("tab", { name: "Month" }).getAttribute("aria-selected")).toBe("true");
+});
+
+test("follows a mouse that leaves the bar before the drag starts", () => {
+  const { bar, day, pointer, onValueChange } = touchTabs();
+  const mouse = { ...pointer, pointerType: "mouse" };
+  fireEvent.pointerDown(day, mouse);
+  fireEvent.pointerMove(document.body, { ...mouse, clientX: 400, clientY: 320 });
+  fireEvent.pointerUp(document.body, { ...mouse, clientX: 400, clientY: 320 });
+  expect(onValueChange).toHaveBeenCalledExactlyOnceWith("month");
+  expect(bar.hasAttribute("data-lifted")).toBe(false);
+});
+
+test("keeps a held touch from scrolling the page, but lets a quick swipe scroll", () => {
+  const { bar, day, pointer } = touchTabs();
+  const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+  const swipe = () => {
+    const event = new Event("touchmove", { bubbles: true, cancelable: true });
+    day.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  fireEvent.pointerDown(day, pointer);
+  now.mockReturnValue(1050);
+  expect(swipe()).toBe(false);
+  fireEvent.pointerCancel(bar, pointer);
+
+  now.mockReturnValue(2000);
+  fireEvent.pointerDown(day, pointer);
+  now.mockReturnValue(2200);
+  expect(swipe()).toBe(true);
+  fireEvent.pointerUp(bar, pointer);
+  expect(swipe()).toBe(false);
+});
+
+test("ignores a tap released off the bar", () => {
+  const { bar, pointer, onValueChange } = touchTabs();
+  const month = screen.getByRole("tab", { name: "Month" });
+  fireEvent.pointerDown(month, { ...pointer, clientX: 234 });
+  fireEvent.pointerUp(bar, { ...pointer, clientX: 234, clientY: 320 });
+  expect(onValueChange).not.toHaveBeenCalled();
+  expect(bar.hasAttribute("data-lifted")).toBe(false);
+});
+
 test.each(["pointerCancel", "lostPointerCapture"] as const)("cancels a drag on %s from the bar", (event) => {
   const { bar, day, pointer, onValueChange } = touchTabs();
   fireEvent.pointerDown(day, pointer);
