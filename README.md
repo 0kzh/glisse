@@ -1,4 +1,4 @@
-![Glisse](https://glisse.kelvinzhang.ca/og.png?v=3)
+https://github.com/user-attachments/assets/84db5ea8-4267-4d70-8d6d-2004fbf8303c
 
 [Glisse](https://glisse.kelvinzhang.ca) is a faithful implementation of Apple's Liquid Glass for the web.
 
