@@ -1,6 +1,6 @@
 {
   "name": "glisse",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A faithful implementation of Apple's Liquid Glass for the web.",
   "keywords": [
     "react",
@@ -15,7 +15,7 @@
   ],
   "license": "MIT",
   "author": "Kelvin Zhang <me@kelvinzhang.ca>",
-  "homepage": "https://glisse.kelvinzhang.ca",
+  "homepage": "https://glisse.kelvinzhang.com",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/0kzh/glisse.git"
