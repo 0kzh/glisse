@@ -36,20 +36,15 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
   const thumbRef = useRef<HTMLSpanElement>(null);
   const faceRef = useRef<HTMLSpanElement>(null);
   const [checked, setChecked] = useControllable(checkedProp, defaultChecked, onCheckedChange);
-  const travel = TRAVEL;
-  const latest = useRef({ checked, setChecked, travel });
+  const latest = useRef({ checked, setChecked });
   const springs = useRef<{ position: Spring; color: Spring } | null>(null);
   useImperativeHandle(forwardedRef, () => ref.current!);
 
   useEffect(() => {
-    latest.current = { checked, setChecked, travel };
+    latest.current = { checked, setChecked };
     springs.current?.position.set(checked ? 1 : 0);
     springs.current?.color.set(checked ? 1 : 0);
-  }, [checked, setChecked, travel]);
-
-  useEffect(() => {
-    springs.current?.position.paint();
-  }, [travel]);
+  }, [checked, setChecked]);
 
   useEffect(() => {
     const el = ref.current!;
@@ -64,7 +59,7 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
 
     const initial = latest.current.checked ? 1 : 0;
     const position = createSpring(initial, 1000, 80, (value) => {
-      x = value * latest.current.travel;
+      x = value * TRAVEL;
       paint();
     });
     const color = createSpring(initial, 1000, 80, (value) => {
@@ -127,7 +122,7 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
       }
       if (!gesture.moved && Math.abs(dx) < 4) return;
       gesture.moved = true;
-      const value = gesture.from + dx / latest.current.travel;
+      const value = gesture.from + dx / TRAVEL;
       const overshoot = value < 0 ? value : value > 1 ? value - 1 : 0;
       position.set(unit(value) + overshoot / 22);
       color.set(value > 0.5 ? 1 : 0);
@@ -137,7 +132,7 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
       if (event.pointerId !== gesture?.id) return;
       ignoreClick = true;
       const { from, x, moved, box } = gesture;
-      const value = from + (event.clientX - x) / latest.current.travel;
+      const value = from + (event.clientX - x) / TRAVEL;
       // A drag lands where it's let go; a tap only counts on the switch.
       const near = event.clientY >= box.top - 24 && event.clientY <= box.bottom + 24;
       settle(moved ? value > 0.5 : near ? !latest.current.checked : undefined);
