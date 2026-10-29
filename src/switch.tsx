@@ -11,6 +11,7 @@ import {
 import { useControllable } from "./internal/controllable";
 import { cx } from "./internal/cx";
 import { held } from "./internal/hold";
+import { createLens, type LensOptions } from "./internal/lens";
 import { createSpring, type Spring } from "./internal/spring";
 
 export interface SwitchProps
@@ -24,6 +25,18 @@ export interface SwitchProps
 const TRAVEL = 57.9 * 0.375;
 const unit = (value: number) => Math.min(1, Math.max(0, value));
 
+// Lifted, the thumb is a lens. As in Aave's switch, it shows the track drawn
+// a little smaller, ringed by the glass, and bent at its rim. --lg-switch-bend
+// overrides the strength.
+const LENS: LensOptions = {
+  strength: 0.45,
+  strengthProperty: "--lg-switch-bend",
+  dispersion: 1,
+  depth: 2,
+  dome: 6,
+  splay: 0.4,
+};
+
 export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLButtonElement>> = /* @__PURE__ */ forwardRef<
   HTMLButtonElement,
   SwitchProps
@@ -32,7 +45,10 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
   forwardedRef,
 ) {
   const ref = useRef<HTMLButtonElement>(null);
+  const bedRef = useRef<HTMLSpanElement>(null);
+  const insetRef = useRef<HTMLSpanElement>(null);
   const fillRef = useRef<HTMLSpanElement>(null);
+  const insetFillRef = useRef<HTMLSpanElement>(null);
   const thumbRef = useRef<HTMLSpanElement>(null);
   const faceRef = useRef<HTMLSpanElement>(null);
   const [checked, setChecked] = useControllable(checkedProp, defaultChecked, onCheckedChange);
@@ -53,13 +69,15 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
 
   useEffect(() => {
     const el = ref.current!;
-    const fill = fillRef.current!;
+    const fills = [fillRef.current!, insetFillRef.current!];
     const thumb = thumbRef.current!;
     const face = faceRef.current!;
+    const lens = createLens(thumb, insetRef.current!, LENS, bedRef.current!);
     let x = 0;
     let scale = 0.65;
     const paint = () => {
       thumb.style.transform = `translate(${x}px, -50%) scale(${scale})`;
+      lens.update();
     };
 
     const initial = latest.current.checked ? 1 : 0;
@@ -68,11 +86,13 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
       paint();
     });
     const color = createSpring(initial, 1000, 80, (value) => {
-      fill.style.opacity = String(unit(value));
+      for (const fill of fills) fill.style.opacity = String(unit(value));
     });
     const lift = createSpring(0, 2000, 80, (value) => {
       scale = 0.65 + 0.25 * value;
       face.style.opacity = String(1 - 0.85 * unit(value));
+      el.style.setProperty("--lg-lift", String(unit(value)));
+      lens.setActive(value > 0.01);
       paint();
     });
     springs.current = { position, color };
@@ -168,6 +188,7 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
     return () => {
       springs.current = null;
       [position, color, lift].forEach((spring) => spring.stop());
+      lens.destroy();
       el.removeEventListener("pointerdown", down);
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
@@ -187,7 +208,16 @@ export const Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLB
       className={cx("lg-switch", className)}
       {...props}
     >
-      <span ref={fillRef} className="lg-switch-fill" aria-hidden />
+      <span ref={bedRef} className="lg-switch-bed" aria-hidden>
+        <span className="lg-switch-track">
+          <span ref={fillRef} className="lg-switch-fill" />
+        </span>
+      </span>
+      <span ref={insetRef} className="lg-switch-bed lg-switch-inset" aria-hidden>
+        <span className="lg-switch-track">
+          <span ref={insetFillRef} className="lg-switch-fill" />
+        </span>
+      </span>
       <span ref={thumbRef} className="lg-switch-thumb" aria-hidden>
         <span ref={faceRef} className="lg-thumb-face" />
       </span>

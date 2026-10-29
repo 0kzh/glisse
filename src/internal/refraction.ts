@@ -6,6 +6,8 @@ const SVG = "http://www.w3.org/2000/svg";
 interface Lens {
   filter: string;
   rim: string;
+  /** A selection's brighter rim, for a light page. */
+  brightRim?: string;
 }
 
 interface Shape {
@@ -21,13 +23,13 @@ let defs: SVGDefsElement | undefined;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-function svg(name: string, attributes: Record<string, string | number>): SVGElement {
+export function svg(name: string, attributes: Record<string, string | number>): SVGElement {
   const element = document.createElementNS(SVG, name);
   for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
   return element;
 }
 
-function container(): SVGDefsElement {
+export function container(): SVGDefsElement {
   if (defs?.isConnected) return defs;
   const root = svg("svg", { width: 0, height: 0, "aria-hidden": "true" });
   root.style.cssText = "position:absolute;pointer-events:none";
@@ -63,6 +65,8 @@ function maps(width: number, height: number, radius: number, selection: boolean,
   const context = canvas.getContext("2d")!;
   const field = context.createImageData(canvas.width, canvas.height);
   const shine = context.createImageData(canvas.width, canvas.height);
+  // A selection's brighter rim, for a light page.
+  const bright = context.createImageData(canvas.width, canvas.height);
   const magnify = shape.zoom > 1 ? context.createImageData(canvas.width, canvas.height) : undefined;
   const reach = Math.max(width, height) / 2;
   const direction = selection ? 1 : -1;
@@ -117,6 +121,16 @@ function maps(width: number, height: number, radius: number, selection: boolean,
         for (let channel = 0; channel < 3; channel++) {
           shine.data[i + channel] = Math.round(255 * (0.65 + 0.35 * (peak ? bands[channel]! / peak : 0)));
         }
+        // On a light page, iOS 26.1's held lens, measured: a white line about
+        // 1.2px wide just inside its edge, lifting what's behind it 60-70% of
+        // the way to white on every side, most where the light falls. Drawn
+        // for the lens at rest, which a hold enlarges by about 1.3.
+        const wide = [0.4, 0.5, 0.6].map((centre) => Math.exp(-(((distance - centre) / 0.4) ** 2)));
+        const top = Math.max(...wide);
+        for (let channel = 0; channel < 3; channel++) {
+          bright.data[i + channel] = Math.round(255 * (0.85 + 0.15 * (top ? wide[channel]! / top : 0)));
+        }
+        bright.data[i + 3] = Math.round(clamp(top * (0.55 + 0.3 * glint + 0.15 * reflected), 0, 1) * 255);
       } else if (distance >= 0) {
         const rim = Math.exp(-(((distance - 0.4) / 0.38) ** 2));
         const bloom = Math.exp(-((distance / (bezel * 0.22)) ** 2));
@@ -130,12 +144,17 @@ function maps(width: number, height: number, radius: number, selection: boolean,
   const displacement = canvas.toDataURL();
   context.putImageData(shine, 0, 0);
   const highlight = canvas.toDataURL();
+  let brightHighlight: string | undefined;
+  if (selection) {
+    context.putImageData(bright, 0, 0);
+    brightHighlight = canvas.toDataURL();
+  }
   let zoom: { map: string; scale: number } | undefined;
   if (magnify) {
     context.putImageData(magnify, 0, 0);
     zoom = { map: canvas.toDataURL(), scale: 2 * reach * (1 - 1 / shape.zoom) };
   }
-  return { displacement, highlight, zoom, scale: maximum * 2 * shape.level };
+  return { displacement, highlight, brightHighlight, zoom, scale: maximum * 2 * shape.level };
 }
 
 // The filter only bends the rim. Blur and the rim highlight are applied in CSS,
@@ -145,7 +164,7 @@ function lens(width: number, height: number, radius: number, selection: boolean,
   const cached = lenses.get(key);
   if (cached) return cached;
 
-  const { displacement, highlight, zoom, scale } = maps(width, height, radius, selection, shape);
+  const { displacement, highlight, brightHighlight, zoom, scale } = maps(width, height, radius, selection, shape);
   const id = `glisse-${lenses.size}`;
   const box = { x: 0, y: 0, width, height };
   const filter = svg("filter", {
@@ -225,7 +244,8 @@ function lens(width: number, height: number, radius: number, selection: boolean,
   }
   container().append(filter);
 
-  const result = { filter: `url("#${id}")`, rim: `url("${highlight}")` };
+  const result: Lens = { filter: `url("#${id}")`, rim: `url("${highlight}")` };
+  if (brightHighlight) result.brightRim = `url("${brightHighlight}")`;
   lenses.set(key, result);
   return result;
 }
@@ -252,9 +272,10 @@ function fit(element: HTMLElement, selection: boolean, filtered: boolean): void 
     zoom: Math.max(1, length("--lg-zoom") ?? 1),
     saturation: Math.max(1, length("--lg-rim-saturation") ?? 1),
   };
-  const { filter, rim } = lens(width, height, radius, selection, shape);
+  const { filter, rim, brightRim } = lens(width, height, radius, selection, shape);
   if (filtered) element.style.setProperty("--lg-filter", filter);
   element.style.setProperty("--lg-rim", rim);
+  if (brightRim) element.style.setProperty("--lg-rim-bright", brightRim);
 }
 
 function whenIdle(callback: () => void): () => void {
@@ -284,6 +305,7 @@ function refract(element: HTMLElement, selection: boolean, filtered: boolean): (
     observer.disconnect();
     element.style.removeProperty("--lg-filter");
     element.style.removeProperty("--lg-rim");
+    element.style.removeProperty("--lg-rim-bright");
   };
 }
 
@@ -595,12 +617,15 @@ function copyBackdrop(element: HTMLElement, source: HTMLElement): () => void {
 /**
  * Refracts what's behind the element. Chromium filters the live backdrop.
  * Safari and Firefox filter a copy of content marked `data-glisse-backdrop`
- * nearby, and otherwise keep the blur with the rim highlight.
+ * nearby, and otherwise keep the blur with the rim highlight. Without
+ * `backdrop`, it fits only the rim highlight, for glass that refracts by
+ * other means.
  */
-export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false): void {
+export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false, backdrop = true): void {
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
+    if (!backdrop) return refract(element, selection, false);
     if (refractsBackdrop()) return refract(element, selection, true);
     const source = selection ? null : findBackdrop(element);
     if (!source) return refract(element, selection, false);
@@ -610,5 +635,5 @@ export function useRefraction(ref: RefObject<HTMLElement | null>, selection = fa
       unfit();
       stop();
     };
-  }, [ref, selection]);
+  }, [ref, selection, backdrop]);
 }

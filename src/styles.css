@@ -6,7 +6,12 @@
   --lg-edge: rgb(0 0 0 / 0.08);
   --lg-drop: rgb(0 0 0 / 0.06);
   --lg-selection: rgb(0 0 0 / 0.1);
-  --lg-lens: rgb(255 255 255 / 0.3);
+  --lg-lens: rgb(0 0 0 / 0.03);
+  --lg-lens-drop: rgb(0 0 0 / 0.11);
+  --lg-segment-track: rgb(118 118 128 / 0.12);
+  --lg-segment-thumb: rgb(255 255 255);
+  --lg-segment-label: rgb(0 0 0);
+  --lg-segment-lens: rgb(0 0 0 / 0.03);
   --lg-surface: rgb(250 250 252 / 0.86);
   --lg-surface-edge: rgb(0 0 0 / 0.08);
   --lg-shadow: rgb(25 25 35 / 0.12);
@@ -18,6 +23,7 @@
   --lg-on: #34c759;
   --lg-fill: #0088ff;
   --lg-ring: rgb(0 0 0 / 0.4);
+  --lg-lens-shine: -1.5;
   --lg-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
@@ -30,6 +36,11 @@
   --lg-drop: transparent;
   --lg-selection: rgb(255 255 255 / 0.145);
   --lg-lens: rgb(255 255 255 / 0.055);
+  --lg-lens-drop: transparent;
+  --lg-segment-track: transparent;
+  --lg-segment-thumb: rgb(235 235 245 / 0.3);
+  --lg-segment-label: rgb(255 255 255);
+  --lg-segment-lens: transparent;
   --lg-surface: rgb(28 28 31 / 0.86);
   --lg-surface-edge: rgb(255 255 255 / 0.13);
   --lg-shadow: rgb(0 0 0 / 0.38);
@@ -41,6 +52,7 @@
   --lg-on: #30d158;
   --lg-fill: #0091ff;
   --lg-ring: rgb(255 255 255 / 0.5);
+  --lg-lens-shine: 1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -53,6 +65,11 @@
     --lg-drop: transparent;
     --lg-selection: rgb(255 255 255 / 0.145);
     --lg-lens: rgb(255 255 255 / 0.055);
+    --lg-lens-drop: transparent;
+    --lg-segment-track: transparent;
+    --lg-segment-thumb: rgb(235 235 245 / 0.3);
+    --lg-segment-label: rgb(255 255 255);
+    --lg-segment-lens: transparent;
     --lg-surface: rgb(28 28 31 / 0.86);
     --lg-surface-edge: rgb(255 255 255 / 0.13);
     --lg-shadow: rgb(0 0 0 / 0.38);
@@ -64,6 +81,7 @@
     --lg-on: #30d158;
     --lg-fill: #0091ff;
     --lg-ring: rgb(255 255 255 / 0.5);
+  --lg-lens-shine: 1;
   }
 }
 
@@ -225,15 +243,19 @@
 
 /* Tab bar */
 
+/* The bar's padding is --lg-tab-inset. The selection fills its slot, less
+   --lg-thumb-inset on every side: none here, 2px on a segmented control. */
 .lg-tab-bar {
   --lg-tab-width: 84px;
   --lg-tab-height: 32px;
+  --lg-tab-inset: 4px;
+  --lg-thumb-inset: 0px;
   --lg-lens-grow-x: 27px;
   --lg-lens-grow-y: 20px;
   position: relative;
   display: inline-flex;
-  padding: 4px;
-  border-radius: calc(var(--lg-tab-height) / 2 + 4px);
+  padding: var(--lg-tab-inset);
+  border-radius: calc(var(--lg-tab-height) / 2 + var(--lg-tab-inset));
   touch-action: pan-y;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
@@ -262,9 +284,37 @@
   transition: opacity 160ms ease;
 }
 
-.lg-tab-bar[data-lifted] .lg-tab-bar-glass::before {
+:is(.lg-tab-bar, .lg-segmented)[data-lifted] .lg-tab-bar-glass::before {
   opacity: 1;
   transition-duration: 120ms;
+}
+
+/* The labels, with room around them for the whole lifted lens, which
+   refracts them (see lens.ts): Safari paints none of a filter outside its
+   element. The room hangs outside the bar and takes no clicks. */
+.lg-tab-labels {
+  --lg-room-x: calc(var(--lg-lens-grow-x) / 2 + 4px);
+  --lg-room-y: calc(var(--lg-lens-grow-y) / 2 + 4px);
+  position: relative;
+  z-index: 1;
+  display: flex;
+  margin: calc(var(--lg-room-y) * -1) calc(var(--lg-room-x) * -1);
+  padding: var(--lg-room-y) var(--lg-room-x);
+  pointer-events: none;
+}
+
+/* What the lifted lens shows in place of the labels: the same labels in full
+   colour, laid exactly over them and seen only through the lens. */
+.lg-tab-lensed {
+  position: absolute;
+  top: var(--lg-tab-inset);
+  left: var(--lg-tab-inset);
+  color: var(--lg-tab-selected, var(--lg-foreground));
+  visibility: hidden;
+}
+
+:is(.lg-tab-bar, .lg-segmented)[data-lensing] .lg-tab-tint {
+  visibility: hidden;
 }
 
 .lg-tab,
@@ -289,12 +339,65 @@
   background: none;
   text-decoration: none;
   cursor: pointer;
+  pointer-events: auto;
   -webkit-touch-callout: none;
   transition: color 200ms ease;
 }
 
 .lg-tab:focus-visible {
   outline-offset: -2px;
+}
+
+/* A tab's own label, wrapped so its colour can change at once, without the
+   tab's colour transition. While the selection is over the selected tab (no
+   data-away), it draws that tab's label alone: drawn twice, the copy on its
+   own layer lands a fraction of a pixel off and the label beneath fringes it.
+   Transparent, not hidden, so the tab keeps its name. */
+.lg-tab-face {
+  display: contents;
+}
+
+.lg-tab-bar:not([data-away]) .lg-tab[data-selected] > .lg-tab-face {
+  color: transparent;
+}
+
+/* A label alone, centred by its letters: its box is trimmed to the height of
+   the capitals above the baseline, so neither the font's ascent and descent
+   nor the page's line height moves it off centre. Browsers without text-box
+   centre its line box instead. */
+.lg-tab-text {
+  display: block;
+  text-box: trim-both cap alphabetic;
+}
+
+/* Tabs with icons, as in an iOS tab bar: each icon over a small label, the
+   others in full colour and the selected one in --lg-tab-selected. */
+.lg-tab-bar[data-icons] {
+  --lg-tab-width: 72px;
+  --lg-tab-height: 52px;
+  --lg-lens-grow-x: 24px;
+  --lg-lens-grow-y: 16px;
+  --lg-tab-selected: var(--lg-fill);
+}
+
+.lg-tab-bar[data-icons] :is(.lg-tab, .lg-tab-copy) {
+  flex-direction: column;
+  gap: 1px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.lg-tab-bar[data-icons] .lg-tab {
+  color: var(--lg-foreground);
+}
+
+.lg-tab-icon {
+  display: flex;
+}
+
+.lg-tab-icon > svg {
+  width: 26px;
+  height: 26px;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -304,13 +407,14 @@
 }
 
 .lg-tab-lens,
-.lg-tab-tint {
+.lg-tab-tint,
+.lg-segmented-thumb {
   position: absolute;
-  top: 4px;
-  left: 4px;
-  width: var(--lg-tab-width);
-  height: var(--lg-tab-height);
-  border-radius: calc(var(--lg-tab-height) / 2);
+  top: calc(var(--lg-tab-inset) + var(--lg-thumb-inset));
+  left: calc(var(--lg-tab-inset) + var(--lg-thumb-inset));
+  width: calc(var(--lg-tab-width) - 2 * var(--lg-thumb-inset));
+  height: calc(var(--lg-tab-height) - 2 * var(--lg-thumb-inset));
+  border-radius: calc(var(--lg-tab-height) / 2 - var(--lg-thumb-inset));
   pointer-events: none;
   transform: translateX(calc(var(--lg-tab-width) * var(--lg-index, 0)));
   transition: opacity 140ms ease;
@@ -320,24 +424,30 @@
 .lg-tab-tint {
   z-index: 1;
   overflow: hidden;
-  color: var(--lg-foreground);
+  color: var(--lg-tab-selected, var(--lg-foreground));
 }
 
+/* The labels again, set back by the tint's inset so they line up. */
 .lg-tab-row {
   display: flex;
-  height: 100%;
+  height: var(--lg-tab-height);
+  margin: calc(var(--lg-thumb-inset) * -1) 0 0 calc(var(--lg-thumb-inset) * -1);
   transform: translateX(calc(var(--lg-tab-width) * var(--lg-index, 0) * -1));
   transform-origin: 0 0;
   will-change: transform;
 }
 
+/* Lifted, the lens casts iOS's shadow (fitted to iOS 26.1), faded in with its
+   lift (--lg-lift) and kept to iOS's size against its own stretch
+   (--lg-lift-y). The page's --lg-lens-drop colours it: none on a dark page. */
 .lg-tab-lens.lg-glass {
   z-index: 2;
   background-color: transparent;
   background-image: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  box-shadow: none;
+  box-shadow: 0 calc(7px / var(--lg-lift-y, 1)) calc(11px / var(--lg-lift-y, 1))
+    color-mix(in srgb, var(--lg-lens-drop) calc(var(--lg-lift, 0) * 100%), transparent);
   transition:
     opacity 140ms ease,
     background-color 140ms ease;
@@ -366,15 +476,91 @@
   transition-duration: 100ms;
 }
 
-.lg-tab-bar[data-refracting] .lg-tab-lens.lg-glass {
+:is(.lg-tab-bar, .lg-segmented)[data-refracting] .lg-tab-lens.lg-glass {
   background-image: var(--lg-rim, none);
+}
+
+/* On a light page (data-light), where a faint lens is lost against light
+   glass, the lifted lens stands out as iOS 26.1's does: it drops under the
+   labels and bends the bar's glass and the page behind it, where the browser
+   can (--lg-filter), and takes iOS's brighter rim. The labels it bends on its
+   own, so they bend once. At rest it lies over the labels, as before. */
+:is(.lg-tab-bar, .lg-segmented)[data-refracting][data-light] .lg-tab-lens.lg-glass {
+  z-index: 0;
+  background-image: var(--lg-rim-bright, var(--lg-rim, none));
   -webkit-backdrop-filter: var(--lg-filter, none);
   backdrop-filter: var(--lg-filter, none);
 }
 
-.lg-tab-bar[data-hidden] :is(.lg-tab-lens, .lg-tab-tint),
-.lg-tab-bar:not([data-ready]):not(:has([data-selected])) :is(.lg-tab-lens, .lg-tab-tint) {
+:is(.lg-tab-bar, .lg-segmented)[data-hidden] :is(.lg-tab-lens, .lg-tab-tint, .lg-segmented-thumb),
+:is(.lg-tab-bar, .lg-segmented):not([data-ready]):not(:has([data-selected])) :is(.lg-tab-lens, .lg-tab-tint, .lg-segmented-thumb) {
   opacity: 0;
+}
+
+/* Segmented control, sized as iOS 26.1's, measured from UIKit: a 32px
+   capsule, segments of 13px labels, and under the selected one a thumb inset
+   2px on every side. Held, the thumb fades and the lens lifts in its place,
+   24px wider and 16px taller. Its track is the tab bar's glass. On a light
+   page it's tinted with iOS's track fill (--lg-segment-track), or the white
+   thumb would vanish against a white page; on a dark one it's the glass
+   alone, exactly as the tab bar's. */
+.lg-segmented {
+  --lg-tab-width: 84px;
+  --lg-tab-height: 32px;
+  --lg-tab-inset: 0px;
+  --lg-thumb-inset: 2px;
+  --lg-lens-grow-x: 24px;
+  --lg-lens-grow-y: 16px;
+  --lg-tab-selected: var(--lg-segment-label);
+  position: relative;
+  display: inline-flex;
+  border-radius: calc(var(--lg-tab-height) / 2);
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.lg-segmented > .lg-tab-bar-glass {
+  background-image: var(--lg-rim, none), linear-gradient(var(--lg-segment-track) 0 0);
+}
+
+.lg-segmented :is(.lg-tab, .lg-tab-copy) {
+  font-size: 13px;
+}
+
+/* Every label in full colour, the selected one in medium, as UIKit sets it.
+   With no colour to change under the thumb, there's no tint: a second copy
+   of a label drawn over it would thicken it. */
+.lg-segmented .lg-tab,
+.lg-segmented .lg-tab:hover {
+  color: var(--lg-segment-label);
+}
+
+.lg-segmented :is(.lg-tab, .lg-tab-copy)[data-selected] {
+  font-weight: 500;
+}
+
+.lg-segmented .lg-tab-tint {
+  display: none;
+}
+
+.lg-segmented-thumb {
+  background: var(--lg-segment-thumb);
+}
+
+.lg-segmented[data-lifted] .lg-segmented-thumb {
+  opacity: 0;
+  transition-duration: 100ms;
+}
+
+.lg-segmented .lg-tab-lens::before {
+  content: none;
+}
+
+.lg-segmented[data-lifted] .lg-tab-lens.lg-glass {
+  background-color: var(--lg-segment-lens);
+  transition-duration: 100ms;
 }
 
 /* Input */
@@ -461,13 +647,19 @@
 
 /* Switch and slider thumbs */
 
+/* At rest, a white knob. Held, it lifts into clear glass, a lens that bends the
+   track under its rim (see lens.ts), so the blur and brightening clear as it
+   lifts and the track shows through true, all but a little frost:
+   --lg-thumb-frost, the blur kept on the lifted glass. */
 .lg-switch-thumb,
 .lg-slider-thumb {
+  --lg-settled: calc(1 - var(--lg-lift, 0));
+  --lg-thumb-blur: calc(2px * var(--lg-settled) + var(--lg-thumb-frost, 0.5px) * var(--lg-lift, 0));
   position: absolute;
   border-radius: 999px;
   pointer-events: none;
-  -webkit-backdrop-filter: blur(2px) brightness(1.15) saturate(1.5);
-  backdrop-filter: blur(2px) brightness(1.15) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--lg-thumb-blur)) brightness(calc(1 + 0.15 * var(--lg-settled))) saturate(1.5);
+  backdrop-filter: blur(var(--lg-thumb-blur)) brightness(calc(1 + 0.15 * var(--lg-settled))) saturate(1.5);
   box-shadow:
     0 6px 24px rgb(0 0 0 / 0.2),
     inset 0 0 0 1.5px rgb(255 255 255 / 0.5),
@@ -494,7 +686,7 @@
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: var(--lg-track);
+  background: none;
   cursor: pointer;
   touch-action: pan-y;
   -webkit-tap-highlight-color: transparent;
@@ -507,12 +699,46 @@
   inset: min(0px, calc((67px * var(--lg-scale) - 44px) / 2)) -8px;
 }
 
+/* What the lifted thumb refracts: the track, with room around it for the
+   whole lens, since Safari paints none of a filter outside its element. */
+.lg-switch-bed {
+  position: absolute;
+  inset: -6px -12px;
+  pointer-events: none;
+}
+
+.lg-switch-track,
 .lg-switch-fill {
   position: absolute;
+  border-radius: 999px;
+}
+
+.lg-switch-track {
+  inset: 6px 12px;
+  background: var(--lg-track);
+}
+
+.lg-switch-fill {
   inset: 0;
-  border-radius: inherit;
   background: var(--lg-on);
   opacity: 0;
+}
+
+/* What the lifted thumb shows in place of the track: the track as Aave's
+   switch draws it, a little smaller so the glass rings it, growing as the
+   thumb does. It's seen only through the thumb (see lens.ts). */
+.lg-switch-inset {
+  visibility: hidden;
+}
+
+/* Centred by margins rather than a transform: WebKit sizes a filter's box by
+   its content's untransformed layout, so nothing may sit past it even before
+   a transform moves it back. */
+.lg-switch-inset .lg-switch-track {
+  inset: 0;
+  width: calc((100% - 24px) * (0.85 + 0.1 * var(--lg-lift, 0)));
+  height: calc((100% - 12px) * 0.75 * (0.525 + 0.45 * var(--lg-lift, 0)));
+  margin: auto;
 }
 
 .lg-switch-thumb {
@@ -544,22 +770,57 @@
   height: 40px;
 }
 
-.lg-slider-track {
+/* What the lifted thumb refracts, with room around the track for the whole lens. */
+.lg-slider-bed {
   position: absolute;
-  inset: 17px 0 auto;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 3px;
-  background: var(--lg-rail);
+  inset: -4px -16px;
   pointer-events: none;
 }
 
+.lg-slider-track {
+  position: absolute;
+  inset: 21px 16px auto;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--lg-rail);
+}
+
+/* Ends under the middle of the thumb, where a lifted thumb shows it. It's
+   rounded rather than clipped by the track, since Safari can't refract
+   content clipped round its corners. */
 .lg-slider-fill {
   display: block;
+  width: calc((100% - 36px) * var(--lg-progress) + 18px);
   height: 100%;
+  border-radius: inherit;
   background: var(--lg-fill);
-  transform: scaleX(var(--lg-progress));
-  transform-origin: left;
+}
+
+/* What the lifted thumb shows in place of the track: the track as Aave's
+   slider draws it, a little thicker as if magnified, growing as the thumb
+   does. It's
+   seen only through the thumb (see lens.ts). --lg-slider-line sets how thick
+   it is once the thumb is fully lifted, and --lg-slider-bend how far the
+   thumb's rim bends it. */
+.lg-slider-magnified {
+  visibility: hidden;
+}
+
+.lg-slider-magnified .lg-slider-track {
+  inset: 0 16px;
+  height: calc(var(--lg-slider-line, 8px) * (0.6 + 0.4 * var(--lg-lift, 0)));
+  margin: auto 0;
+  border-radius: 999px;
+}
+
+/* Within a few pixels of either end, the fill gives way from the middle of
+   the thumb to the end of the track, so through the thumb an empty slider
+   shows no fill and a full one no bare track. */
+.lg-slider-magnified .lg-slider-fill {
+  --lg-travel: calc((100% - 36px) * var(--lg-progress));
+  width: calc(
+    var(--lg-travel) + min(18px, var(--lg-travel) * 4) + max(0px, 18px - (100% - 36px - var(--lg-travel)) * 4)
+  );
 }
 
 .lg-slider-thumb {

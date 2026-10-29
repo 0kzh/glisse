@@ -12,12 +12,15 @@ import {
 import { useControllable } from "./internal/controllable";
 import { cx } from "./internal/cx";
 import { held } from "./internal/hold";
+import { createLens, type LensOptions } from "./internal/lens";
 import { useRefraction } from "./internal/refraction";
 import { createSpring } from "./internal/spring";
 
 export interface TabBarItem {
   value: string;
   label: ReactNode;
+  /** An icon drawn above the label, as in an iOS tab bar. */
+  icon?: ReactNode;
   /** Renders the tab as a link. Clicking it navigates; the bar still tracks selection. */
   href?: string;
 }
@@ -35,6 +38,10 @@ export interface TabBarProps extends Omit<HTMLAttributes<HTMLDivElement>, "defau
 interface Parts {
   bar: HTMLElement;
   glass: HTMLElement;
+  /** A segmented control's thumb, under the labels. A tab bar has none. */
+  thumb: HTMLElement | null;
+  labels: HTMLElement;
+  lensed: HTMLElement;
   lens: HTMLElement;
   tint: HTMLElement;
   row: HTMLElement;
@@ -50,10 +57,34 @@ const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
 const REST = [1024, 58.9, 676, 47.8] as const;
 const DRAG = [2500, 94, 576, 44.2] as const;
 
-function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) => void): Controller {
+// Lifted, the selection is a lens over the labels, bending them at its rim
+// with Aave's toggle group's shape: no dome, no splay, a little dispersion.
+// --lg-tab-bend overrides the strength.
+const LENS: LensOptions = {
+  strength: 0.3,
+  strengthProperty: "--lg-tab-bend",
+  dispersion: 0.1,
+  depth: 2.5,
+  dome: 0,
+  splay: 1,
+};
+
+// A segmented control's lens bends its labels the same way.
+// --lg-segment-bend overrides the strength.
+const SEGMENT_LENS: LensOptions = { ...LENS, strengthProperty: "--lg-segment-bend" };
+
+function attach(
+  { bar, glass, thumb, labels, lensed, lens, tint, row }: Parts,
+  options: LensOptions,
+  select: (index: number) => void,
+): Controller {
   const tabs = [...bar.querySelectorAll<HTMLElement>(".lg-tab")];
   let slot = 0;
+  // The selection's size and its gap from its slot's edges, --lg-thumb-inset.
+  let width = 0;
   let height = 0;
+  let inset = 0;
+  let padding = 0;
   let growX = 16;
   let growY = 12;
   let active = -1;
@@ -61,10 +92,23 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   let settleFrame = 0;
   let gesture: { id: number; x: number; anchor: number; moved: boolean; box: DOMRect; at: number } | null = null;
   const state = { x: 0, lift: 0 };
+  // Through the lifted lens, the labels in full colour stand in for the tint,
+  // refracted; at rest the tint shows the selected label.
+  const refraction = createLens(lens, lensed, options, labels);
+  let lensing = false;
+
+  // Whether the selection is off the selected tab (data-away). Over it,
+  // lifted or not, the selection draws that tab's label: the tint at rest,
+  // the lens's copy when lifted. The tab's own label then hides, as drawn
+  // twice the two land a fraction of a pixel apart and fringe each other.
+  const mark = () => bar.toggleAttribute("data-away", active < 0 || Math.abs(state.x - active * slot) > 0.5);
 
   const measure = () => {
     const style = getComputedStyle(bar);
-    slot = (bar.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)) / tabs.length;
+    padding = parseFloat(style.paddingLeft) || 0;
+    slot = (bar.clientWidth - padding - (parseFloat(style.paddingRight) || 0)) / tabs.length;
+    inset = parseFloat(style.getPropertyValue("--lg-thumb-inset")) || 0;
+    width = slot - 2 * inset;
     height = lens.offsetHeight;
     growX = parseFloat(style.getPropertyValue("--lg-lens-grow-x")) || 0;
     growY = parseFloat(style.getPropertyValue("--lg-lens-grow-y")) || 0;
@@ -72,11 +116,24 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
 
   const paint = () => {
     const { x, lift } = state;
-    const sx = 1 + (growX / slot) * lift;
+    const sx = 1 + (growX / width) * lift;
     const sy = 1 + (growY / height) * lift;
-    lens.style.transform = tint.style.transform = `translateX(${x}px) scale(${sx}, ${sy})`;
-    row.style.transform = `scale(${1 / sx}, ${1 / sy}) translate(${-x + ((sx - 1) * slot) / 2}px, ${((sy - 1) * height) / 2}px)`;
+    const transform = `translateX(${x}px) scale(${sx}, ${sy})`;
+    lens.style.transform = tint.style.transform = transform;
+    if (thumb) thumb.style.transform = transform;
+    lens.style.setProperty("--lg-lift", String(clamp(lift, 0, 1)));
+    lens.style.setProperty("--lg-lift-y", String(sy));
+    // The tint's row of labels sits where the labels do, against the tint's
+    // scale about its centre and its inset in its slot.
+    row.style.transform = `scale(${1 / sx}, ${1 / sy}) translate(${-x + (sx - 1) * (inset + width / 2)}px, ${(sy - 1) * (inset + height / 2)}px)`;
     if (!gesture && lift < 0.01) delete bar.dataset.refracting;
+    mark();
+    if (lift > 0.01 !== lensing) {
+      lensing = lift > 0.01;
+      bar.toggleAttribute("data-lensing", lensing);
+      refraction.setActive(lensing);
+    }
+    refraction.update();
   };
 
   const x = createSpring(0, REST[0], REST[1], (value) => {
@@ -97,6 +154,9 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   };
 
   const settle = (instant = false) => {
+    // A new selection is marked before the next frame, so its label never
+    // blinks out ahead of the selection.
+    mark();
     if (gesture) return;
     const show = active >= 0;
     if (show) delete bar.dataset.hidden;
@@ -110,7 +170,7 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
 
   const light = (event: PointerEvent, box: DOMRect) => {
     glass.style.setProperty("--lg-x", `${clamp(((event.clientX - box.left) / box.width) * 100, 0, 100)}%`);
-    lens.style.setProperty("--lg-x", `${clamp(((event.clientX - box.left - 4 - state.x) / slot) * 100, 0, 100)}%`);
+    lens.style.setProperty("--lg-x", `${clamp(((event.clientX - box.left - padding - inset - state.x) / width) * 100, 0, 100)}%`);
   };
 
   const release = () => {
@@ -131,6 +191,9 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
     cancelAnimationFrame(settleFrame);
     settleFrame = 0;
     measure();
+    // On a light page the lifted lens bends the bar behind it and takes a
+    // brighter rim (data-light). Read on each hold: the page's theme can change.
+    bar.toggleAttribute("data-light", parseFloat(getComputedStyle(lens).getPropertyValue("--lg-lens-shine")) < 0);
     const box = bar.getBoundingClientRect();
     gesture = {
       id: event.pointerId,
@@ -264,8 +327,9 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
       cancelAnimationFrame(settleFrame);
       x.stop();
       lift.stop();
+      refraction.destroy();
       observer.disconnect();
-      for (const key of ["ready", "hidden", "lifted", "refracting"]) delete bar.dataset[key];
+      for (const key of ["ready", "hidden", "lifted", "refracting", "lensing", "away", "light"]) delete bar.dataset[key];
       bar.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerEnd);
@@ -280,7 +344,31 @@ function attach({ bar, glass, lens, tint, row }: Parts, select: (index: number) 
   };
 }
 
-export function TabBar({
+// A tab's content: its label, under its icon if it has one. A label alone is
+// boxed so it can be centred by its letters rather than its font's line box.
+function content(item: TabBarItem): ReactNode {
+  if (item.icon === undefined) return <span className="lg-tab-text">{item.label}</span>;
+  return (
+    <>
+      <span className="lg-tab-icon" aria-hidden>
+        {item.icon}
+      </span>
+      <span className="lg-tab-label">{item.label}</span>
+    </>
+  );
+}
+
+export function TabBar(props: TabBarProps): JSX.Element {
+  return <Segments kind="tab-bar" {...props} />;
+}
+
+/**
+ * A row of choices with one selected, under a selection that lifts into a
+ * lens while held: a tab bar's, over glass, or a segmented control's, a thumb
+ * on a track. Only TabBar and SegmentedControl use it.
+ */
+export function Segments({
+  kind,
   items,
   value: valueProp,
   defaultValue = null,
@@ -289,9 +377,13 @@ export function TabBar({
   className,
   style,
   ...props
-}: TabBarProps): JSX.Element {
+}: TabBarProps & { kind: "tab-bar" | "segmented" }): JSX.Element {
+  const segmented = kind === "segmented";
   const barRef = useRef<HTMLDivElement>(null);
   const glassRef = useRef<HTMLSpanElement>(null);
+  const thumbRef = useRef<HTMLSpanElement>(null);
+  const labelsRef = useRef<HTMLSpanElement>(null);
+  const lensedRef = useRef<HTMLSpanElement>(null);
   const lensRef = useRef<HTMLSpanElement>(null);
   const tintRef = useRef<HTMLSpanElement>(null);
   const rowRef = useRef<HTMLSpanElement>(null);
@@ -300,9 +392,13 @@ export function TabBar({
   const selected = items.findIndex((item) => item.value === value);
   const latest = useRef({ items, selected, setValue });
   const signature = items.map((item) => item.value).join("\n");
-  const navigation = items.every((item) => item.href !== undefined);
+  const navigation = !segmented && items.every((item) => item.href !== undefined);
+  const icons = !segmented && items.some((item) => item.icon !== undefined);
 
   useRefraction(glassRef);
+  // Where the browser can, the lens bends what's behind it, the bar's glass
+  // and the page, as thick glass does at its rim. The labels sit above it and
+  // it bends them on its own (see lens.ts), so they bend once.
   useRefraction(lensRef, true);
 
   useEffect(() => {
@@ -311,7 +407,17 @@ export function TabBar({
 
   useEffect(() => {
     const instance = attach(
-      { bar: barRef.current!, glass: glassRef.current!, lens: lensRef.current!, tint: tintRef.current!, row: rowRef.current! },
+      {
+        bar: barRef.current!,
+        glass: glassRef.current!,
+        thumb: thumbRef.current,
+        labels: labelsRef.current!,
+        lensed: lensedRef.current!,
+        lens: lensRef.current!,
+        tint: tintRef.current!,
+        row: rowRef.current!,
+      },
+      segmented ? SEGMENT_LENS : LENS,
       (index) => {
         const item = latest.current.items[index];
         if (item) latest.current.setValue(item.value);
@@ -323,7 +429,7 @@ export function TabBar({
       instance.destroy();
       controller.current = null;
     };
-  }, [signature]);
+  }, [signature, segmented]);
 
   useLayoutEffect(() => {
     controller.current?.setActive(selected);
@@ -332,43 +438,55 @@ export function TabBar({
   return (
     <div
       ref={barRef}
-      role={navigation ? "navigation" : "tablist"}
-      className={cx("lg-tab-bar", className)}
+      role={segmented ? "radiogroup" : navigation ? "navigation" : "tablist"}
+      data-icons={icons ? "" : undefined}
+      className={cx(segmented ? "lg-segmented" : "lg-tab-bar", className)}
       style={{ ...style, "--lg-index": Math.max(selected, 0), "--lg-tabs": items.length } as CSSProperties}
       {...props}
     >
       <span ref={glassRef} className="lg-glass lg-tab-bar-glass" aria-hidden />
-      {items.map((item, index) =>
-        item.href !== undefined ? (
-          <Link
-            key={item.value}
-            href={item.href}
-            className="lg-tab"
-            data-selected={index === selected ? "" : undefined}
-            aria-current={index === selected ? "page" : undefined}
-            draggable={false}
-          >
-            {item.label}
-          </Link>
-        ) : (
-          <button
-            key={item.value}
-            type="button"
-            role="tab"
-            className="lg-tab"
-            data-selected={index === selected ? "" : undefined}
-            aria-selected={index === selected}
-            tabIndex={index === selected || (selected < 0 && index === 0) ? 0 : -1}
-          >
-            {item.label}
-          </button>
-        ),
-      )}
+      {segmented && <span ref={thumbRef} className="lg-segmented-thumb" aria-hidden />}
+      <span ref={labelsRef} className="lg-tab-labels" role="none">
+        {items.map((item, index) =>
+          item.href !== undefined ? (
+            <Link
+              key={item.value}
+              href={item.href}
+              className="lg-tab"
+              data-selected={index === selected ? "" : undefined}
+              aria-current={index === selected ? "page" : undefined}
+              draggable={false}
+            >
+              <span className="lg-tab-face">{content(item)}</span>
+            </Link>
+          ) : (
+            <button
+              key={item.value}
+              type="button"
+              role={segmented ? "radio" : "tab"}
+              className="lg-tab"
+              data-selected={index === selected ? "" : undefined}
+              aria-selected={segmented ? undefined : index === selected}
+              aria-checked={segmented ? index === selected : undefined}
+              tabIndex={index === selected || (selected < 0 && index === 0) ? 0 : -1}
+            >
+              <span className="lg-tab-face">{content(item)}</span>
+            </button>
+          ),
+        )}
+      </span>
+      <span ref={lensedRef} className="lg-tab-labels lg-tab-lensed" aria-hidden>
+        {items.map((item, index) => (
+          <span key={item.value} className="lg-tab-copy" data-selected={index === selected ? "" : undefined}>
+            {content(item)}
+          </span>
+        ))}
+      </span>
       <span ref={tintRef} className="lg-tab-tint" aria-hidden>
         <span ref={rowRef} className="lg-tab-row">
           {items.map((item) => (
             <span key={item.value} className="lg-tab-copy">
-              {item.label}
+              {content(item)}
             </span>
           ))}
         </span>

@@ -167,6 +167,71 @@ test("a tap on the selected tab releases its lift", async () => {
   expect(lens.style.transform).toBe("translateX(0px) scale(1, 1)");
 });
 
+test("the held lens's shadow follows its lift, against its stretch", async () => {
+  const { day, lens, pointer } = touchTabs();
+  vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+  fireEvent.pointerDown(day, pointer);
+  expect(lens.style.getPropertyValue("--lg-lift")).toBe("1");
+  expect(lens.style.getPropertyValue("--lg-lift-y")).toBe("1.625");
+  fireEvent.pointerUp(day, pointer);
+  await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+  expect(lens.style.getPropertyValue("--lg-lift")).toBe("0");
+  expect(lens.style.getPropertyValue("--lg-lift-y")).toBe("1");
+});
+
+test("over the selected tab, lifted or not, the selection draws its label alone", async () => {
+  // A visible page, in motion: springs animate rather than jump.
+  vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
+  const { bar, day, lens, pointer } = touchTabs();
+  const frame = () => act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+  const frames = async (count: number) => {
+    for (let i = 0; i < count; i++) await frame();
+  };
+  const arrive = async () => {
+    for (let i = 0; i < 120 && bar.hasAttribute("data-away"); i++) await frame();
+  };
+  // Mounted on Day: Day's own label is the one to hide.
+  expect(bar.hasAttribute("data-away")).toBe(false);
+  expect(day.querySelector(":scope > .lg-tab-face")).not.toBeNull();
+
+  // Held and lifted over Day, the lens draws Day, so its label stays hidden:
+  // nothing switches as it lifts or as it settles back.
+  fireEvent.pointerDown(day, pointer);
+  await frames(10);
+  expect(bar.hasAttribute("data-lifted")).toBe(true);
+  expect(bar.hasAttribute("data-away")).toBe(false);
+  // Dragged off Day, Day's label shows again.
+  fireEvent.pointerMove(day, { ...pointer, clientX: 66 + 40 });
+  await frames(10);
+  expect(bar.hasAttribute("data-away")).toBe(true);
+  fireEvent.pointerCancel(bar, pointer);
+  await arrive();
+  expect(bar.hasAttribute("data-away")).toBe(false);
+
+  // Choosing Month marks the bar before the next frame, so Month's label
+  // never vanishes ahead of the selection.
+  fireEvent.click(screen.getByRole("tab", { name: "Month" }));
+  expect(bar.hasAttribute("data-away")).toBe(true);
+  await arrive();
+  expect(bar.hasAttribute("data-away")).toBe(false);
+  await frames(60);
+  expect(lens.style.transform).toBe("translateX(168px) scale(1, 1)");
+});
+
+test("marks a held lens on a light page, read afresh on each hold", () => {
+  const { bar, day, pointer } = touchTabs();
+  fireEvent.pointerDown(day, pointer);
+  expect(bar.hasAttribute("data-light")).toBe(true);
+  fireEvent.pointerCancel(bar, pointer);
+
+  // The page turns dark: the next hold keeps the lens as dark pages have it.
+  bar.closest("div")!.parentElement!.setAttribute("data-theme", "dark");
+  fireEvent.pointerDown(day, pointer);
+  expect(bar.hasAttribute("data-light")).toBe(false);
+  fireEvent.pointerCancel(bar, pointer);
+});
+
 test("leaves modified link taps to the browser", () => {
   const { bar, pointer, onValueChange } = touchTabs({ navigation: true });
   const month = screen.getByRole("link", { name: "Month" });
@@ -221,4 +286,32 @@ test("renders links through a custom component", () => {
   const current = screen.getByRole("link", { name: "Blog" });
   expect(current.getAttribute("aria-current")).toBe("page");
   expect(current.hasAttribute("data-custom")).toBe(true);
+});
+
+test("draws each tab's icon above its label, and copies both for the selection", () => {
+  const icon = (name: string) => <svg data-icon={name} viewBox="0 0 24 24" />;
+  render(
+    <TabBar
+      aria-label="Sections"
+      items={[
+        { value: "today", label: "Today", icon: icon("today") },
+        { value: "sports", label: "Sports", icon: icon("sports") },
+      ]}
+      defaultValue="sports"
+    />,
+  );
+  const bar = screen.getByRole("tablist", { name: "Sections" });
+  expect(bar.hasAttribute("data-icons")).toBe(true);
+  // The icon is decoration: the tab is named by its label.
+  const sports = screen.getByRole("tab", { name: "Sports" });
+  expect(sports.querySelector(".lg-tab-icon [data-icon='sports']")).not.toBeNull();
+  expect(sports.querySelector(".lg-tab-icon")!.getAttribute("aria-hidden")).toBe("true");
+  // The tint and the lens's copy show the same icons.
+  expect(bar.querySelectorAll(".lg-tab-copy [data-icon='sports']")).toHaveLength(2);
+});
+
+test("keeps the plain layout when no tab has an icon", () => {
+  render(<TabBar aria-label="Range" items={items} defaultValue="day" />);
+  expect(screen.getByRole("tablist").hasAttribute("data-icons")).toBe(false);
+  expect(screen.getByRole("tab", { name: "Day" }).querySelector(".lg-tab-icon")).toBeNull();
 });
