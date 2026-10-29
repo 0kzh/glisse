@@ -1,6 +1,6 @@
 {
   "name": "glisse",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "A faithful implementation of Apple's Liquid Glass for the web.",
   "keywords": [
     "react",
@@ -9,6 +9,7 @@
     "ui",
     "components",
     "tab bar",
+    "segmented control",
     "switch",
     "slider",
     "menu"
