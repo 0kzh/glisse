@@ -47,6 +47,15 @@ function advance(s: State, dt: number): void {
   }
 }
 
+// Once nothing moves, the frame asked for is given back, so the next spring
+// asks for its own rather than waiting on one that may never come.
+function rest(s: State): void {
+  moving.delete(s);
+  if (moving.size || !frame) return;
+  cancelAnimationFrame(frame);
+  frame = 0;
+}
+
 function tick(time: number): void {
   frame = 0;
   const dt = Math.min(0.1, Math.max(0, (time - last) / 1000));
@@ -81,7 +90,7 @@ export function createSpring(
       if (instant || document.hidden || prefersReducedMotion()) {
         s.value = target;
         s.velocity = 0;
-        moving.delete(s);
+        rest(s);
         paint(target);
         return;
       }
@@ -97,8 +106,6 @@ export function createSpring(
       s.stiffness = nextStiffness;
       s.damping = nextDamping;
     },
-    stop: () => {
-      moving.delete(s);
-    },
+    stop: () => rest(s),
   };
 }
