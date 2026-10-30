@@ -240,6 +240,41 @@ test("lights its rim as iOS does: a line at the very edge, lit from the top left
   expect(lit[0]).toBeGreaterThan(220);
 });
 
+test("takes new settings on its next render, with no resize", () => {
+  browse(CHROME);
+  boxes = { glass: new DOMRect(40, 40, 200, 100) };
+  const scene = (bend: number, dispersion: number, shine: number) => (
+    <div>
+      <div data-glisse-backdrop />
+      <Glass
+        data-testid="glass"
+        style={
+          { "--lg-glass-bend": bend, "--lg-glass-dispersion": dispersion, "--lg-rim-shine": shine } as React.CSSProperties
+        }
+      />
+    </div>
+  );
+  const { rerender } = render(scene(0.45, 0.4, 0.3));
+  // Red's pass and blue's: red bends further as the colours split.
+  const scales = () =>
+    [...filterOf(marked())!.querySelectorAll('feDisplacementMap[in2="across-pull-0"]')].map((pass) =>
+      Number(pass.getAttribute("scale")),
+    );
+  expect(scales()[0]).toBeCloseTo(0.45 * 100 * 1.08);
+  expect(scales()[2]).toBeCloseTo(0.45 * 100);
+  const painted = vi.mocked(HTMLCanvasElement.prototype.toDataURL).mock.calls.length;
+
+  rerender(scene(0.2, 1.5, 0.27));
+  expect(scales()[0]).toBeCloseTo(0.2 * 100 * 1.3);
+  expect(scales()[2]).toBeCloseTo(0.2 * 100);
+  // The rim, drawn again for its new strength.
+  expect(vi.mocked(HTMLCanvasElement.prototype.toDataURL).mock.calls.length).toBe(painted + 1);
+
+  // No colours split at all.
+  rerender(scene(0.2, 0, 0.27));
+  expect(scales()[0]).toBeCloseTo(scales()[2]!);
+});
+
 test("paints its rim again when the page's theme changes", async () => {
   browse(SAFARI);
   boxes = { glass: new DOMRect(0, 0, 123, 45) };

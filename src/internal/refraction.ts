@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 import { createLens, distance, fitBackdropLens, shapeOf, type Lens, type LensOptions, type Shape } from "./lens";
 import { container, svg } from "./svg";
@@ -7,12 +7,15 @@ import { container, svg } from "./svg";
 // tab bar (see lens.ts), shaped as Aave's free-moving lens, the first demo in
 // its article, and scaled to the glass: a rim band a quarter of its shorter
 // side wide, a dome that sags the whole half of it, and a reach of 0.45 of
-// it, Aave's 72px on its 160px lens. --lg-glass-bend overrides the strength.
-// The light on its rim the glass paints over its own frost, as iOS does (below).
+// it, Aave's 72px on its 160px lens. --lg-glass-bend overrides the strength,
+// and --lg-glass-dispersion how far its colours split (0.4: red bends 8%
+// further than blue). The light on its rim the glass paints over its own
+// frost, as iOS does (below).
 export const GLASS: LensOptions = {
   strength: 0.45,
   strengthProperty: "--lg-glass-bend",
   dispersion: 0.4,
+  dispersionProperty: "--lg-glass-dispersion",
   depth: 0.25,
   dome: 0.5,
   splay: 1,
@@ -171,19 +174,34 @@ function whenIdle(callback: () => void): () => void {
   return () => clearTimeout(handle);
 }
 
+interface Fitting {
+  /** Fits again now, once it has fitted at all: for settings changed without a resize. */
+  refit(): void;
+  /** Stops, and removes what fitting set. */
+  stop(): void;
+}
+
 // Fits the glass once the page is idle, and again whenever it changes size.
-// Clearing it removes what fitting set.
-function refitting(element: HTMLElement, fit: () => void, properties: string[]): () => void {
+function refitting(element: HTMLElement, fit: () => void, properties: string[]): Fitting {
   let cancel: (() => void) | undefined;
+  let fitted = false;
   const observer = new ResizeObserver(() => {
     cancel?.();
-    cancel = whenIdle(fit);
+    cancel = whenIdle(() => {
+      fitted = true;
+      fit();
+    });
   });
   observer.observe(element);
-  return () => {
-    cancel?.();
-    observer.disconnect();
-    for (const name of properties) element.style.removeProperty(name);
+  return {
+    refit: () => {
+      if (fitted) fit();
+    },
+    stop: () => {
+      cancel?.();
+      observer.disconnect();
+      for (const name of properties) element.style.removeProperty(name);
+    },
   };
 }
 
@@ -237,10 +255,10 @@ function follow(): void {
 // Makes the glass a lens over the marked content behind it, as a thumb is
 // over its track: the content is filtered with the glass's map placed where
 // the glass stands, and the glass frosts it as usual.
-function bend(element: HTMLElement, source: HTMLElement): () => void {
+function bend(element: HTMLElement, source: HTMLElement): Fitting {
   const lens = createLens(element, source, GLASS);
   let started = false;
-  const stop = refitting(
+  const fitting = refitting(
     element,
     () => {
       paintRim(element);
@@ -254,12 +272,15 @@ function bend(element: HTMLElement, source: HTMLElement): () => void {
     },
     ["--lg-rim"],
   );
-  return () => {
-    stop();
-    const lenses = followed.get(source);
-    lenses?.delete(lens);
-    if (lenses && !lenses.size) followed.delete(source);
-    lens.destroy();
+  return {
+    refit: fitting.refit,
+    stop: () => {
+      fitting.stop();
+      const lenses = followed.get(source);
+      lenses?.delete(lens);
+      if (lenses && !lenses.size) followed.delete(source);
+      lens.destroy();
+    },
   };
 }
 
@@ -269,14 +290,19 @@ function bend(element: HTMLElement, source: HTMLElement): () => void {
  * where the glass stands. Over anything else, Chromium filters the live
  * backdrop with the same lens, and other browsers keep the frost and the lit
  * rim. `selection` is the tab bar's lifted lens, whose own bend is below.
+ *
+ * The glass reads its settings (--lg-glass-bend, --lg-glass-dispersion,
+ * --lg-rim-shine) when it fits, and again each time it renders, so settings
+ * set from React, on it or above it, take effect at once.
  */
 export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false): void {
+  const refit = useRef<(() => void) | null>(null);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    if (selection) return refitting(element, () => fitSelection(element, refractsBackdrop()), SELECTION_PROPERTIES);
+    if (selection) return refitting(element, () => fitSelection(element, refractsBackdrop()), SELECTION_PROPERTIES).stop;
     const source = findBackdrop(element);
-    const stop = source
+    const fitting = source
       ? bend(element, source)
       : refitting(
           element,
@@ -286,13 +312,17 @@ export function useRefraction(ref: RefObject<HTMLElement | null>, selection = fa
           },
           ["--lg-filter", "--lg-rim"],
         );
+    refit.current = fitting.refit;
     const stopWatching = onThemeChange(() => paintRim(element));
     return () => {
+      refit.current = null;
       stopWatching();
-      stop();
+      fitting.stop();
       element.removeAttribute("data-rim");
     };
   }, [ref, selection]);
+  // After every render: cheap when nothing changed, as the maps are cached.
+  useEffect(() => refit.current?.());
 }
 
 // The tab bar's lifted lens, on a light page, bends the bar's glass and the

@@ -48,8 +48,10 @@ export interface LensOptions {
   shine?: number;
   /** Width of the lit edge, in px, if not the page's. */
   edgeWidth?: number;
-  /** How much further red bends than blue, from 0 to 1. */
+  /** How much further red bends than blue: at 1, a fifth further. */
   dispersion: number;
+  /** A custom property on the glass that, when set, overrides the dispersion. */
+  dispersionProperty?: string;
   /** Width of the band around the rim that bends, in px. */
   depth: number;
   /** Sag of the dome whose slope sets the bend along the rim, in px. */
@@ -442,6 +444,7 @@ interface Fit {
   key: string;
   shine: number;
   strength: number;
+  dispersion: number;
   width: number;
   height: number;
 }
@@ -461,7 +464,7 @@ export function shapeOf(glass: HTMLElement, style: CSSStyleDeclaration = getComp
 }
 
 // Draws the map for the glass's size, shape and light, or takes it from the
-// cache, along with the strength and shine read off the glass.
+// cache, along with the strength, dispersion and shine read off the glass.
 function fit(glass: HTMLElement, options: LensOptions): Fit | null {
   const style = getComputedStyle(glass);
   const shape = shapeOf(glass, style);
@@ -473,6 +476,8 @@ function fit(glass: HTMLElement, options: LensOptions): Fit | null {
   const tuned = options.strengthProperty ? parseFloat(style.getPropertyValue(options.strengthProperty)) : NaN;
   const own = page > 0 ? (options.darkStrength ?? options.strength) : options.strength;
   const strength = Number.isFinite(tuned) ? tuned : own;
+  const split = options.dispersionProperty ? parseFloat(style.getPropertyValue(options.dispersionProperty)) : NaN;
+  const dispersion = Number.isFinite(split) ? Math.max(0, split) : options.dispersion;
   const density = Math.min(devicePixelRatio || 1, 2);
   // Glass that paints its own light uses only where the map bends, which is
   // the same on any page.
@@ -480,7 +485,7 @@ function fit(glass: HTMLElement, options: LensOptions): Fit | null {
   const light = options.edgeWidth === undefined ? theme : { ...theme, edgeWidth: options.edgeWidth };
   const key = [width, height, radius, density, JSON.stringify(light), JSON.stringify(options)].join("|");
   const maps = encode(key, () => lensMap(shape, options, light, density));
-  return maps ? { maps, key: `${key}|${shine}`, shine, strength, width, height } : null;
+  return maps ? { maps, key: `${key}|${shine}`, shine, strength, dispersion, width, height } : null;
 }
 
 /** Glass that moves over content of its own. */
@@ -538,7 +543,7 @@ function render(surface: Surface): void {
       const width = at.width / unit;
       const height = at.height / unit;
       const reach = member.fit.strength * Math.min(width, height);
-      const { dispersion } = member.options;
+      const { dispersion } = member.fit;
       member.placed = { x: (at.left - from.left) / unit, y: (at.top - from.top) / unit, width, height, reach, dispersion };
       shown.push(member);
     }
@@ -567,7 +572,11 @@ function render(surface: Surface): void {
     surface.placed = "";
   }
   const placed = shown.map((member) => member.placed!);
-  const next = [across, down, ...placed.flatMap(({ x, y, width, height, reach }) => [x, y, width, height, reach])]
+  const next = [
+    across,
+    down,
+    ...placed.flatMap(({ x, y, width, height, reach, dispersion }) => [x, y, width, height, reach, dispersion]),
+  ]
     .map((value) => value.toFixed(2))
     .join(" ");
   if (next === surface.placed) return;
@@ -682,13 +691,13 @@ const backdrops = new Map<string, string>();
 export function fitBackdropLens(glass: HTMLElement, options: LensOptions): void {
   const fitted = fit(glass, options);
   if (!fitted) return;
-  const { maps, key, shine, strength, width, height } = fitted;
+  const { maps, key, shine, strength, dispersion, width, height } = fitted;
   const reach = strength * Math.min(width, height);
-  const id = `${key}|${reach}`;
+  const id = `${key}|${reach}|${dispersion}`;
   let name = backdrops.get(id);
   if (!name) {
     const built = graph([{ maps, shine }], false, false);
-    place(built, [{ x: 0, y: 0, width, height, reach, dispersion: options.dispersion }], width, height, false);
+    place(built, [{ x: 0, y: 0, width, height, reach, dispersion }], width, height, false);
     name = `glisse-backdrop-${backdrops.size}`;
     built.filter.id = name;
     container().append(built.filter);
