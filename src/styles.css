@@ -24,6 +24,7 @@
   --lg-fill: #0088ff;
   --lg-ring: rgb(0 0 0 / 0.4);
   --lg-lens-shine: -1.5;
+  --lg-rim-shine: 0.3;
   --lg-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
@@ -53,6 +54,7 @@
   --lg-fill: #0091ff;
   --lg-ring: rgb(255 255 255 / 0.5);
   --lg-lens-shine: 1;
+  --lg-rim-shine: 0.13;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -82,6 +84,7 @@
     --lg-fill: #0091ff;
     --lg-ring: rgb(255 255 255 / 0.5);
   --lg-lens-shine: 1;
+    --lg-rim-shine: 0.13;
   }
 }
 
@@ -97,6 +100,12 @@
   box-shadow:
     inset 0 0 0 0.5px var(--lg-edge),
     0 1px 3px var(--lg-drop);
+}
+
+/* Glass that paints its rim (see refraction.ts) draws its edge line there,
+   under the light, which an inset shadow would cover. */
+.lg-glass[data-rim] {
+  box-shadow: 0 1px 3px var(--lg-drop);
 }
 
 .lg-glass::after {
@@ -118,30 +127,6 @@
 .lg-glass[data-pressed]::after {
   opacity: 1;
   transition-duration: 0s;
-}
-
-/* Glass refracting a copy of its backdrop, where the live one can't be filtered */
-
-.lg-glass[data-copy] {
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
-.lg-glass-copy {
-  position: absolute;
-  top: 0;
-  left: 0;
-  margin: 0;
-  overflow: hidden;
-  transform-origin: 0 0;
-  pointer-events: none;
-}
-
-.lg-glass-copy > div {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: 0 0;
 }
 
 /* Button */

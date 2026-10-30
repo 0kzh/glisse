@@ -1,6 +1,6 @@
 import type { HTMLAttributes, JSX, ReactNode } from "react";
 
-import { Segments } from "./tab-bar";
+import { Segments } from "./internal/segments";
 
 export interface SegmentedControlItem {
   value: string;
