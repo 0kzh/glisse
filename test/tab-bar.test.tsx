@@ -306,8 +306,8 @@ test("draws each tab's icon above its label, and copies both for the selection",
   const sports = screen.getByRole("tab", { name: "Sports" });
   expect(sports.querySelector(".lg-tab-icon [data-icon='sports']")).not.toBeNull();
   expect(sports.querySelector(".lg-tab-icon")!.getAttribute("aria-hidden")).toBe("true");
-  // The tint and the lens's two copies (what the labels cover, and what they add) show the same icons.
-  expect(bar.querySelectorAll(".lg-tab-copy [data-icon='sports']")).toHaveLength(3);
+  // The tint and the lens's copy show the same icons.
+  expect(bar.querySelectorAll(".lg-tab-copy [data-icon='sports']")).toHaveLength(2);
 });
 
 test("keeps the plain layout when no tab has an icon", () => {

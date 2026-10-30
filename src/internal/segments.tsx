@@ -46,8 +46,6 @@ interface Parts {
   thumb: HTMLElement | null;
   labels: HTMLElement;
   lensed: HTMLElement;
-  /** A second copy of the labels, for what they add as ink (see lens.ts), if they're ink. */
-  glow: HTMLElement | null;
   lens: HTMLElement;
   tint: HTMLElement;
   row: HTMLElement;
@@ -97,7 +95,7 @@ const SEGMENT_LENS: LensOptions = {
 };
 
 function attach(
-  { bar, glass, thumb, labels, lensed, glow, lens, tint, row }: Parts,
+  { bar, glass, thumb, labels, lensed, lens, tint, row }: Parts,
   options: LensOptions,
   bendsBackdrop: boolean,
   select: (index: number) => void,
@@ -117,13 +115,8 @@ function attach(
   let gesture: { id: number; x: number; anchor: number; moved: boolean; box: DOMRect; at: number } | null = null;
   const state = { x: 0, lift: 0 };
   // Through the lifted lens, the labels in full colour stand in for the tint,
-  // refracted; at rest the tint shows the selected label. As ink they're two
-  // copies, which add up to the labels as drawn: what they cover, then what
-  // they add (see lens.ts).
-  const refractions =
-    options.ink && glow
-      ? [createLens(lens, lensed, options, labels, "cover"), createLens(lens, glow, options, labels, "glow")]
-      : [createLens(lens, lensed, options, labels)];
+  // refracted; at rest the tint shows the selected label.
+  const refraction = createLens(lens, lensed, options, labels);
   // On a light page the lifted lens also bends what's behind it, the bar's
   // glass and the page, with the same lens, where the browser can.
   const backdrop = bendsBackdrop && refractsBackdrop() ? createBackdropLens(lens, options) : null;
@@ -163,7 +156,7 @@ function attach(
     if (lift > 0.01 !== lensing) {
       lensing = lift > 0.01;
       bar.toggleAttribute("data-lensing", lensing);
-      for (const refraction of refractions) refraction.setActive(lensing);
+      refraction.setActive(lensing);
     }
     // The bend grows as the lens lifts and fades as it settles, so it never
     // switches on or off at a visible strength. On a light page the lens
@@ -175,7 +168,7 @@ function attach(
     lens.style.setProperty("--lg-rest", String(clamp(1 - lift / UNDER, 0, 1)));
     lens.style.setProperty("--lg-under", String(under));
     bar.toggleAttribute("data-under", lift > UNDER);
-    for (const refraction of refractions) refraction.update(amount);
+    refraction.update(amount);
     backdrop?.update(under);
   };
 
@@ -371,7 +364,7 @@ function attach(
       cancelAnimationFrame(settleFrame);
       x.stop();
       lift.stop();
-      for (const refraction of refractions) refraction.destroy();
+      refraction.destroy();
       backdrop?.destroy();
       observer.disconnect();
       for (const key of ["ready", "hidden", "lifted", "refracting", "lensing", "away", "light", "under"]) delete bar.dataset[key];
@@ -426,7 +419,6 @@ export function Segments({
   const thumbRef = useRef<HTMLSpanElement>(null);
   const labelsRef = useRef<HTMLSpanElement>(null);
   const lensedRef = useRef<HTMLSpanElement>(null);
-  const glowRef = useRef<HTMLSpanElement>(null);
   const lensRef = useRef<HTMLSpanElement>(null);
   const tintRef = useRef<HTMLSpanElement>(null);
   const rowRef = useRef<HTMLSpanElement>(null);
@@ -457,7 +449,6 @@ export function Segments({
         thumb: thumbRef.current,
         labels: labelsRef.current!,
         lensed: lensedRef.current!,
-        glow: glowRef.current,
         lens: lensRef.current!,
         tint: tintRef.current!,
         row: rowRef.current!,
@@ -521,15 +512,13 @@ export function Segments({
           ),
         )}
       </span>
-      {(segmented ? [lensedRef] : [lensedRef, glowRef]).map((ref, layer) => (
-        <span key={layer} ref={ref} className="lg-tab-labels lg-tab-lensed" aria-hidden>
-          {items.map((item, index) => (
-            <span key={item.value} className="lg-tab-copy" data-selected={index === selected ? "" : undefined}>
-              {content(item)}
-            </span>
-          ))}
-        </span>
-      ))}
+      <span ref={lensedRef} className="lg-tab-labels lg-tab-lensed" aria-hidden>
+        {items.map((item, index) => (
+          <span key={item.value} className="lg-tab-copy" data-selected={index === selected ? "" : undefined}>
+            {content(item)}
+          </span>
+        ))}
+      </span>
       <span ref={tintRef} className="lg-tab-tint" aria-hidden>
         <span ref={rowRef} className="lg-tab-row">
           {items.map((item) => (

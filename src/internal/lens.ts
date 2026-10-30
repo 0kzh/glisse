@@ -69,27 +69,16 @@ export interface LensOptions {
   /**
    * Whether the content is ink, such as labels, over whatever is under it.
    * Ink's colour is mostly its alpha, which red, green and blue share, so
-   * split as it is it only blurs. As ink it's drawn as two layers that add
-   * up to the ink drawn as usual, each laid on paper and split: how much of
-   * each colour it covers, black on white, multiplied in; and the colour it
-   * adds, on black, added. Make a lens for each over its own copy of the
-   * content, the `"cover"` copy first, then the `"glow"`.
+   * split as it is it only blurs. As ink, each colour keeps its own coverage
+   * (see `graph`), so its edges fringe as through glass.
    */
   ink?: boolean;
   /** Softens what the rim bends, as iOS's tab bar lens does, by a Gaussian blur of this deviation in px. */
   blur?: number;
 }
 
-/** One of ink's two layers: see `LensOptions.ink`. */
-export type Ink = "cover" | "glow";
-
-// The glow is added to what's under it, where the browser can; screened
-// elsewhere, which differs only part way across the ink's edges.
-let adds: boolean | undefined;
-const glowBlend = (): string => {
-  adds ??= typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("mix-blend-mode", "plus-lighter");
-  return adds ? "plus-lighter" : "screen";
-};
+/** The page ink lies on, which its fringes are made up for: see `graph`. */
+type Ink = "light" | "dark";
 
 /** Where the light catches the rim. */
 export interface Light {
@@ -313,6 +302,67 @@ interface Part {
   soften?: SVGElement;
 }
 
+const matrix = (input: string, values: string, result: string) => svg("feColorMatrix", { in: input, type: "matrix", values, result });
+const sum = (a: string, b: string, k2: number, k3: number, result: string) =>
+  svg("feComposite", { in: a, in2: b, operator: "arithmetic", k2, k3, result });
+
+// Lens k's rays added up as content of its own colour: each colour keeps a
+// third of its alpha, so content that's partly transparent adds back up to
+// what it was, and its colour is tripled after.
+function spread(k: number): SVGElement[] {
+  return [
+    ...CHANNELS.map((channel, i) => matrix(`ray-${k}-${i}`, `${channel}  0 0 0 0.3333 0`, `light-${k}-${i}`)),
+    sum(`light-${k}-0`, `light-${k}-1`, 1, 1, `light-${k}-01`),
+    sum(`light-${k}-01`, `light-${k}-2`, 1, 1, `spread-${k}`),
+    matrix(`spread-${k}`, "3 0 0 0 0  0 3 0 0 0  0 0 3 0 0  0 0 0 1 0", `bent-${k}`),
+  ];
+}
+
+// Lens k's rays added up as ink (see graph): with alpha M, the most any colour
+// covers, and each colour i, covering a_i in ink of colour c_i, as
+// a_i c_i + P (M - a_i), with P the page's white or black. Put together at
+// half strength, a colour at a time, so no step runs past full, and doubled.
+function inked(k: number, page: Ink): SVGElement[] {
+  const white = page === "light" ? 1 : 0;
+  const steps: SVGElement[] = [];
+  // Colour i alone, over black (its ink colour) or off white (one less it).
+  const own = (i: number) =>
+    [0, 1, 2]
+      .map((r) => (r === i ? `${[0, 1, 2].map((c) => (c === i ? (white ? -1 : 1) : 0)).join(" ")} 0 ${white}` : "0 0 0 0 0"))
+      .join("  ") + "  0 0 0 1 0";
+  CHANNELS.forEach((_, i) => {
+    const ray = `ray-${k}-${i}`;
+    steps.push(
+      // How much it covers, as an opaque grey, to find the most.
+      matrix(ray, "0 0 0 1 0  0 0 0 1 0  0 0 0 1 0  0 0 0 0 1", `cover-${k}-${i}`),
+      // Its coverage alone.
+      matrix(ray, "0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", `covers-${k}-${i}`),
+      // What its colour gives over black, or takes from white.
+      matrix(ray, own(i), `inks-${k}-${i}`),
+    );
+  });
+  steps.push(
+    svg("feBlend", { in: `cover-${k}-0`, in2: `cover-${k}-1`, mode: "lighten", result: `most-${k}-01` }),
+    svg("feBlend", { in: `most-${k}-01`, in2: `cover-${k}-2`, mode: "lighten", result: `most-${k}` }),
+    matrix(`most-${k}`, `0 0 0 0 ${white}  0 0 0 0 ${white}  0 0 0 0 ${white}  1 0 0 0 0`, `inked-${k}`),
+  );
+  let at = `inked-${k}`;
+  CHANNELS.forEach((_, i) => {
+    // Raise the alpha by the colour's coverage, then take it off again with
+    // what the colour gives or takes, so every step stays in range.
+    const [gain, loss] = white ? [`covers-${k}-${i}`, `inks-${k}-${i}`] : [`inks-${k}-${i}`, `covers-${k}-${i}`];
+    steps.push(
+      sum(at, gain, i === 0 ? 0.5 : 1, 0.5, `inked-${k}-${i}a`),
+      sum(`inked-${k}-${i}a`, loss, 1, -0.5, `inked-${k}-${i}b`),
+    );
+    at = `inked-${k}-${i}b`;
+  });
+  const double = svg("feComponentTransfer", { in: at, result: `bent-${k}` });
+  double.append(svg("feFuncA", { type: "linear", slope: 2, intercept: 0 }));
+  steps.push(double);
+  return steps;
+}
+
 /** A lens's filter, for one or more lenses over the same content. */
 interface Graph {
   filter: SVGElement;
@@ -332,30 +382,26 @@ interface Bend {
 // the glass disperses, and lit unless the glass paints its own light. Each
 // lens's maps and passes are kept to the lens's own box, as Aave's are, so
 // moving a lens over large content redraws only the lens, and two passes
-// over the whole content put each lens's result in place. Ink is laid on
-// paper (see `LensOptions.ink`): each colour of each ray as it's split, and
-// the content left as it is all at once. Covering ink is black, so only its
-// alpha counts.
+// over the whole content put each lens's result in place.
+//
+// Content that isn't ink is split by keeping a third of each colour's ray
+// and adding them up, which suits content of its own colour. Ink's colour is
+// mostly its alpha, which that averages, so ink is drawn as it would look:
+// with the alpha of whichever colour covers most, and each colour's own
+// coverage made up from what's taken to be under it, white on a light page
+// and black on a dark one. That's exact wherever the colours cover alike, as
+// in the middle of a label and along its antialiased edges; only the fringes
+// between them take the page's colour on trust. It's drawn normally, with no
+// blend mode, so it looks the same wherever the page puts it.
 function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
   const unit = box ? "objectBoundingBox" : "userSpaceOnUse";
   const filter = svg("filter", { filterUnits: unit, primitiveUnits: unit, "color-interpolation-filters": "sRGB" });
   if (box) {
     for (const [key, value] of Object.entries({ x: 0, y: 0, width: 1, height: 1 })) filter.setAttribute(key, String(value));
   }
-  const ink = lenses[0]?.ink;
-  const source = ink === "cover" ? "ink" : "SourceGraphic";
-  if (ink === "cover") {
-    filter.append(svg("feColorMatrix", { in: "SourceGraphic", type: "matrix", values: "0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", result: "ink" }));
-  }
-  if (ink) {
-    filter.append(
-      svg("feFlood", { "flood-color": ink === "cover" ? "#fff" : "#000", result: "paper" }),
-      svg("feComposite", { in: source, in2: "paper", operator: "over", result: "laid" }),
-    );
-  }
 
   const single = lenses.length === 1;
-  const parts = lenses.map(({ maps, shine, blur }, k): Part => {
+  const parts = lenses.map(({ maps, shine, blur, ink }, k): Part => {
     // What's merged across lenses keeps a plain name when there's one lens.
     const merged = (name: string) => (single ? name : `${name}-${k}`);
     const image = (href: string, result: string) => svg("feImage", { href, preserveAspectRatio: "none", result });
@@ -377,25 +423,12 @@ function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
         half,
       );
     }
-    // The shade on a light page's rim, from the light's grey. The glow of
-    // ink takes it before it's laid on paper, so it shades the ink, not the
-    // paper. Where a dark page's rim is lit, the light covers what's under
-    // it as it adds to it, so covering ink takes that light as shade.
-    const darkens = ink === "cover" ? -Math.max(shine, 0) : Math.min(shine, 0);
-    if (darkens < 0) {
-      const row = `0 0 ${darkens} 0 ${1 - (128 * darkens) / 255}`;
-      filter.append(svg("feColorMatrix", { in: merged("raw"), type: "matrix", values: `${row}  ${row}  ${row}  0 0 0 0 1`, result: `shade-${k}` }));
-    }
-
-    // Each colour keeps a third of its alpha, so content that's partly
-    // transparent adds back up to what it was; its colour is tripled after.
+    // Each colour's ray: the content displaced as far as that colour bends.
     // The first pass reads the whole content, so it's kept to the box
-    // outright; what follows from it stays there. Ink's paper covers the
-    // whole content, so a blur near the box's edge reads paper, which leaves
-    // what's under it as it is.
-    const rays = CHANNELS.map((channel, i): [SVGElement, SVGElement] => {
+    // outright; what follows from it stays there.
+    const rays = CHANNELS.map((_, i): [SVGElement, SVGElement] => {
       const across = svg("feDisplacementMap", {
-        in: source,
+        in: "SourceGraphic",
         in2: `across-pull-${k}`,
         xChannelSelector: "R",
         yChannelSelector: "A",
@@ -408,33 +441,11 @@ function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
         yChannelSelector: "R",
         result: `ray-${k}-${i}`,
       });
-      const third = `${channel}  0 0 0 0.3333 0`;
       boxed.push(across);
       filter.append(across, down);
-      let ray = `ray-${k}-${i}`;
-      if (ink) {
-        const steps = [];
-        if (ink === "glow" && darkens < 0) {
-          steps.push(svg("feComposite", { in: ray, in2: `shade-${k}`, operator: "arithmetic", k1: 1, result: `shaded-${k}-${i}` }));
-          ray = `shaded-${k}-${i}`;
-        }
-        steps.push(svg("feComposite", { in: ray, in2: "paper", operator: "over", result: `laid-${k}-${i}` }));
-        ray = `laid-${k}-${i}`;
-        filter.append(...steps);
-      }
-      filter.append(svg("feColorMatrix", { in: ray, type: "matrix", values: third, result: `light-${k}-${i}` }));
       return [across, down];
     });
-    filter.append(
-      svg("feComposite", { in: `light-${k}-0`, in2: `light-${k}-1`, operator: "arithmetic", k2: 1, k3: 1, result: `light-${k}-01` }),
-      svg("feComposite", { in: `light-${k}-01`, in2: `light-${k}-2`, operator: "arithmetic", k2: 1, k3: 1, result: `spread-${k}` }),
-      svg("feColorMatrix", {
-        in: `spread-${k}`,
-        type: "matrix",
-        values: "3 0 0 0 0  0 3 0 0 0  0 0 3 0 0  0 0 0 1 0",
-        result: `bent-${k}`,
-      }),
-    );
+    filter.append(...(ink ? inked(k, ink) : spread(k)));
     // The blur, laid on as far as the rim bends: from the shape map's grey.
     let soften: SVGElement | undefined;
     if (blur) {
@@ -452,17 +463,21 @@ function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
     }
     const bent = blur ? `softened-${k}` : `bent-${k}`;
     // The light on the rim, from its grey: added as white, or on a light page
-    // as shade multiplied in, which glowing ink has taken already.
+    // as shade multiplied in.
     let lit = bent;
-    if (shine > 0 && ink !== "cover") {
+    if (shine > 0) {
       const white = `0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 1 0 ${-128 / 255}`;
       filter.append(
         svg("feColorMatrix", { in: merged("raw"), type: "matrix", values: white, result: `glint-${k}` }),
         svg("feComposite", { in: `glint-${k}`, in2: bent, operator: "arithmetic", k2: shine, k3: 1, result: `lit-${k}` }),
       );
       lit = `lit-${k}`;
-    } else if (darkens < 0 && ink !== "glow") {
-      filter.append(svg("feComposite", { in: `shade-${k}`, in2: bent, operator: "arithmetic", k1: 1, result: `lit-${k}` }));
+    } else if (shine < 0) {
+      const row = `0 0 ${shine} 0 ${1 - (128 * shine) / 255}`;
+      filter.append(
+        svg("feColorMatrix", { in: merged("raw"), type: "matrix", values: `${row}  ${row}  ${row}  0 0 0 0 1`, result: `shade-${k}` }),
+        svg("feComposite", { in: `shade-${k}`, in2: bent, operator: "arithmetic", k1: 1, result: `lit-${k}` }),
+      );
       lit = `lit-${k}`;
     }
     // Where the map covers, the bent content, split by the map's own alpha.
@@ -480,7 +495,7 @@ function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
   // so the two add back up exactly where it fades. A stand-in is then cut to
   // the lens's shape.
   filter.append(
-    svg("feComposite", { in: ink ? "laid" : "SourceGraphic", in2: "raw", operator: "out", result: "outside" }),
+    svg("feComposite", { in: "SourceGraphic", in2: "raw", operator: "out", result: "outside" }),
     svg("feComposite", { in: "inside", in2: "outside", operator: "arithmetic", k2: 1, k3: 1, result: "seen" }),
   );
   if (standIn) filter.append(svg("feComposite", { in: "seen", in2: "shape", operator: "in" }));
@@ -526,9 +541,10 @@ function place(graph: Graph, placed: Placed[], across: number, down: number, box
 
 interface Fit {
   maps: Encoded;
-  /** The maps' key and the light's strength, which together set the filter's shape. */
+  /** The maps' key, the light's strength and the page's tone, which together set the filter's shape. */
   key: string;
   shine: number;
+  ink?: Ink;
   blur: number;
   strength: number;
   dispersion: number;
@@ -573,7 +589,9 @@ function fit(glass: HTMLElement, options: LensOptions): Fit | null {
   const key = [width, height, radius, density, JSON.stringify(light), JSON.stringify(options)].join("|");
   const maps = encode(key, () => lensMap(shape, options, light, density));
   const blur = options.blur ?? 0;
-  return maps ? { maps, key: `${key}|${shine}`, shine, blur, strength, dispersion, width, height } : null;
+  // The page's shine is negative on a light page.
+  const ink: Ink | undefined = options.ink ? (page < 0 ? "light" : "dark") : undefined;
+  return maps ? { maps, key: `${key}|${shine}|${ink}`, shine, ink, blur, strength, dispersion, width, height } : null;
 }
 
 /** Glass that moves over content of its own. */
@@ -595,8 +613,6 @@ interface Member {
   glass: HTMLElement;
   options: LensOptions;
   replaces?: HTMLElement;
-  /** Which of ink's layers its content is, if it's ink. */
-  ink?: Ink;
   /** How far it bends now, from 0 to 1. */
   amount: number;
   fit?: Fit;
@@ -648,7 +664,6 @@ function render(surface: Surface): void {
   if (!shown.length) {
     surface.placed = "";
     content.style.removeProperty("filter");
-    content.style.removeProperty("mix-blend-mode");
     if (surface.standIn) content.style.removeProperty("visibility");
     surface.standIn = false;
     return;
@@ -657,11 +672,11 @@ function render(surface: Surface): void {
   const box = boxUnits();
   const standIn = shown.some((member) => member.replaces);
   surface.standIn = standIn;
-  const structure = shown.map((member) => `${member.fit!.key}|${member.ink}`).join("\n") + (standIn ? "\nstand-in" : "");
+  const structure = shown.map((member) => member.fit!.key).join("\n") + (standIn ? "\nstand-in" : "");
   if (structure !== surface.built || !surface.graph) {
     surface.graph?.filter.remove();
     surface.graph = graph(
-      shown.map(({ fit, ink }) => ({ ...fit!, ink })),
+      shown.map((member) => member.fit!),
       box,
       standIn,
     );
@@ -682,9 +697,6 @@ function render(surface: Surface): void {
   place(surface.graph, placed, across, down, box);
   surface.graph.filter.id = `${surface.name}-${++surface.version}`;
   content.style.filter = `url("#${surface.graph.filter.id}")`;
-  const ink = shown[0]!.ink;
-  if (ink) content.style.setProperty("mix-blend-mode", ink === "cover" ? "multiply" : glowBlend());
-  else content.style.removeProperty("mix-blend-mode");
 
   for (const member of shown) {
     if (!member.replaces) continue;
@@ -727,7 +739,7 @@ function mask(element: HTMLElement, layers?: { image: string; position: string; 
  * below 0 it darkens, as on a light page. Both it and the strength property
  * are read each time the lens becomes active or is refitted.
  */
-export function createLens(glass: HTMLElement, content: HTMLElement, options: LensOptions, replaces?: HTMLElement, ink?: Ink): Lens {
+export function createLens(glass: HTMLElement, content: HTMLElement, options: LensOptions, replaces?: HTMLElement): Lens {
   let surface = surfaces.get(content);
   if (!surface) {
     surface = {
@@ -744,7 +756,7 @@ export function createLens(glass: HTMLElement, content: HTMLElement, options: Le
   }
   const shared = surface;
   shared.lenses++;
-  const member: Member = { glass, options, replaces, ink: options.ink ? ink : undefined, amount: 1 };
+  const member: Member = { glass, options, replaces, amount: 1 };
   let active = false;
 
   const prepare = () => {

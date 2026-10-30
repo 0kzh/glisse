@@ -231,7 +231,7 @@ test("a lifted tab bar lens shows the labels in full colour, refracted, in place
   expect(labels.style.getPropertyValue("mask-image")).toBe("");
 });
 
-test("a lifted tab bar lens splits its labels into colours as ink, in two layers that add up to them", () => {
+test("a lifted tab bar lens splits its labels into colours as ink, drawn with no blend mode", () => {
   browse(CHROME);
   const items = [
     { value: "day", label: "Day" },
@@ -240,30 +240,27 @@ test("a lifted tab bar lens splits its labels into colours as ink, in two layers
   const { container } = render(<TabBar aria-label="Range" items={items} defaultValue="day" />);
   const bar = container.querySelector<HTMLElement>(".lg-tab-bar")!;
   const lens = bar.querySelector<HTMLElement>(".lg-tab-lens")!;
-  const [cover, glow] = [...bar.querySelectorAll<HTMLElement>(".lg-tab-lensed")];
+  const lensed = bar.querySelectorAll<HTMLElement>(".lg-tab-lensed");
+  expect(lensed).toHaveLength(1);
   bar.style.padding = "4px";
   vi.spyOn(bar, "clientWidth", "get").mockReturnValue(176);
 
   // Light, then dark, each on a tab that isn't selected, so it settles at once.
-  for (const [shine, name] of [["-1.5", "Week"], ["1", "Day"]] as const) {
+  for (const [shine, name, page] of [["-1.5", "Week", "1"], ["1", "Day", "0"]] as const) {
     lens.style.setProperty("--lg-lens-shine", shine);
     fireEvent.pointerDown(screen.getByRole("tab", { name }), pointer);
-    // What the labels cover, black on white, multiplied in.
-    const covering = filterOf(cover!)!;
-    expect(covering.querySelector('feColorMatrix[result="ink"]')).not.toBeNull();
-    expect(covering.querySelector('feFlood[result="paper"]')?.getAttribute("flood-color")).toBe("#fff");
-    expect(cover!.style.getPropertyValue("mix-blend-mode")).toBe("multiply");
-    // What they add, on black, added.
-    const glowing = filterOf(glow!)!;
-    expect(glowing.querySelector('feFlood[result="paper"]')?.getAttribute("flood-color")).toBe("#000");
-    expect(["plus-lighter", "screen"]).toContain(glow!.style.getPropertyValue("mix-blend-mode"));
-    // Both are softened at the rim, and red bends further than blue.
-    expect(glowing.querySelector("feGaussianBlur")).not.toBeNull();
-    const scales = [...glowing.querySelectorAll("feDisplacementMap")].map((map) => Number(map.getAttribute("scale")));
+    const filter = filterOf(lensed[0]!)!;
+    // Its alpha is the most any colour covers; the rest is made up from the page, white or black.
+    expect(filter.querySelectorAll('feBlend[mode="lighten"]')).toHaveLength(2);
+    const base = [...filter.querySelectorAll("feColorMatrix")].find((m) => m.getAttribute("result")?.match(/^inked-\d+$/));
+    expect(base?.getAttribute("values")?.split(/\s+/)[4]).toBe(page);
+    expect(lensed[0]!.style.getPropertyValue("mix-blend-mode")).toBe("");
+    // Softened at the rim, and red bends further than blue.
+    expect(filter.querySelector("feGaussianBlur")).not.toBeNull();
+    const scales = [...filter.querySelectorAll("feDisplacementMap")].map((map) => Number(map.getAttribute("scale")));
     expect(scales[0]! / scales[4]!).toBeCloseTo(1.4);
     fireEvent.pointerUp(window, pointer);
-    expect(cover!.style.getPropertyValue("mix-blend-mode")).toBe("");
-    expect(glow!.style.getPropertyValue("mix-blend-mode")).toBe("");
+    expect(lensed[0]!.style.filter).toBe("");
   }
 });
 
