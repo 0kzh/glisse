@@ -42,6 +42,18 @@ test("bends only the rim of the lens, pulling content in from the middle", () =>
   expect(at(map.light, columns / 2, middle)[0]).toBe(128);
 });
 
+test("glass's band and dome scale with its size", () => {
+  const glass = { strength: 0.45, dispersion: 0.4, depth: 0.25, dome: 0.5, splay: 1, relative: true, paintsLight: true };
+  const bends = (size: number) => {
+    const map = lensMap({ width: size, height: size, radius: size / 4 }, glass, light, 1);
+    const row = map.across.slice(((size / 2) * size) * 4, ((size / 2) * size + size) * 4);
+    // How far in from the left edge the pull reaches.
+    return [...row.filter((_, i) => i % 4 === 0)].findIndex((grey) => Math.abs(grey - 128) <= 1) / size;
+  };
+  // The band is the same share of a small panel as of a large one.
+  expect(bends(40)).toBeCloseTo(bends(160), 1);
+});
+
 const browse = (userAgent: string) => vi.spyOn(navigator, "userAgent", "get").mockReturnValue(userAgent);
 const SAFARI = "Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 const CHROME = "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";

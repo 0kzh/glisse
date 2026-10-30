@@ -1,10 +1,17 @@
-import { container, svg } from "./refraction";
+import { container, svg } from "./svg";
 
-// A lens is glass that moves over content of its own, like a switch's thumb
-// over its track. As in Aave's web glass, the content itself is filtered: a
-// displacement map drawn for the lens's shape is placed where the glass
-// stands, so only what's under the glass bends. Filtering the content rather
-// than the backdrop works in every browser and needs no copy of anything.
+// A lens is glass over content of its own, like a switch's thumb over its
+// track, or a panel over the content marked as its backdrop. As in Aave's web
+// glass, the content itself is filtered: a displacement map drawn for the
+// lens's shape is placed where the glass stands, so only what's under the
+// glass bends. Filtering the content rather than the backdrop works in every
+// browser and needs no copy of anything. Several lenses over one piece of
+// content share its filter, each bending only within its own box.
+//
+// Moving a lens redraws the filter over the whole content, which Safari does
+// on the CPU: about 40ms a frame for content 1200 by 800 at 2x, so a lens
+// that moves over its content in Safari wants that content small. Still
+// lenses cost nothing after their first frame.
 //
 // A lens can also show a stand-in for what's under it, as Aave's slider shows
 // a thicker track inside its thumb: the stand-in is filtered to show only
@@ -49,6 +56,14 @@ export interface LensOptions {
   dome: number;
   /** How far the bend near each side keeps to that side's own direction, from 0 to 1. */
   splay: number;
+  /** Whether `depth` and `dome` are shares of the lens's shorter side, for glass of any size, rather than px. */
+  relative?: boolean;
+  /**
+   * Whether the glass paints the light on its rim itself, rather than the
+   * filter lighting the content. Glass with a frost of its own paints it, so
+   * the frost doesn't blur it.
+   */
+  paintsLight?: boolean;
 }
 
 /** Where the light catches the rim. */
@@ -67,7 +82,7 @@ export interface Light {
 const DARK: Light = { angle: 45, glow: 0.4, spread: 0.5, glowPower: 1.5, edge: 0.5, edgeWidth: 2, edgePower: 1.5 };
 const LIGHT: Light = { angle: 30, glow: 0.4, spread: 0.5, glowPower: 2, edge: 0.5, edgeWidth: 1.5, edgePower: 1 };
 
-interface Shape {
+export interface Shape {
   width: number;
   height: number;
   radius: number;
@@ -79,7 +94,7 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 const erf = (x: number) => Math.tanh(1.7724538509 * x);
 
 // Signed distance to a rounded rectangle centred on the origin; negative inside.
-function distance(x: number, y: number, halfWidth: number, halfHeight: number, radius: number): number {
+export function distance(x: number, y: number, halfWidth: number, halfHeight: number, radius: number): number {
   const qx = Math.abs(x) - halfWidth + radius;
   const qy = Math.abs(y) - halfHeight + radius;
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - radius;
@@ -148,7 +163,10 @@ export function lensMap(shape: Shape, options: LensOptions, light: Light, densit
     data[i + 3] = alpha;
   };
 
-  const { depth, dome, splay } = options;
+  const share = options.relative ? Math.min(width, height) : 1;
+  const depth = options.depth * share;
+  const dome = options.dome * share;
+  const { splay } = options;
   const innerWidth = Math.max(0, halfWidth - depth);
   const innerHeight = Math.max(0, halfHeight - depth);
   const innerRadius = clamp(radius, 0, Math.min(innerWidth, innerHeight));
@@ -207,10 +225,11 @@ export function lensMap(shape: Shape, options: LensOptions, light: Light, densit
       const glow =
         glowRange > 0.001 ? light.glow * clamp((facing - glowStart) / glowRange, 0, 1) ** light.glowPower * falloff : 0;
       const rim = light.edge * Math.max(0, 1 + edge / light.edgeWidth) * facing ** light.edgePower;
+      const amount = Math.min(1, glow + rim);
       // Fully in once the pull reaches about a twentieth of its strength, and
       // smoothed over the last pixel at the edge.
-      const bends = Math.round(255 * Math.min(1, falloff * 20, -edge));
-      grey(caught, i, Math.round(127 * Math.min(1, glow + rim) + 128), bends);
+      const bends = Math.min(1, falloff * 20, -edge);
+      grey(caught, i, Math.round(127 * amount + 128), Math.round(255 * bends));
     }
   }
   return { columns, rows, across: pullAcross, down: pullDown, light: caught, shape: shapeMask };
@@ -229,19 +248,24 @@ const encoded = new Map<string, Encoded>();
 function encode(key: string, draw: () => LensMap): Encoded | null {
   const cached = encoded.get(key);
   if (cached) return cached;
-  const { columns, rows, across, down, light, shape } = draw();
+  const map = draw();
   const canvas = document.createElement("canvas");
-  canvas.width = columns;
-  canvas.height = rows;
+  canvas.width = map.columns;
+  canvas.height = map.rows;
   const context = canvas.getContext("2d");
   if (!context) return null;
-  const image = context.createImageData(columns, rows);
+  const image = context.createImageData(map.columns, map.rows);
   const png = (data: Uint8ClampedArray) => {
     image.data.set(data);
     context.putImageData(image, 0, 0);
     return canvas.toDataURL();
   };
-  const result = { across: png(across), down: png(down), light: png(light), shape: png(shape) };
+  const result = {
+    across: png(map.across),
+    down: png(map.down),
+    light: png(map.light),
+    shape: png(map.shape),
+  };
   encoded.set(key, result);
   return result;
 }
@@ -251,6 +275,321 @@ const boxUnits = (): boolean =>
   /AppleWebKit\//.test(navigator.userAgent) && !/Chrom(?:e|ium)\//.test(navigator.userAgent);
 
 const CHANNELS = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0"];
+
+/** One lens's part of a filter. */
+interface Part {
+  /** Everything kept to the lens's box: its placed maps, and the passes that bend through them. */
+  boxed: SVGElement[];
+  /** Each colour's pass across, then down. */
+  rays: [SVGElement, SVGElement][];
+}
+
+/** A lens's filter, for one or more lenses over the same content. */
+interface Graph {
+  filter: SVGElement;
+  parts: Part[];
+}
+
+/** How a lens bends and lights what's under it, as its filter needs. */
+interface Bend {
+  maps: Encoded;
+  shine: number;
+}
+
+// A filter that leaves the content as it is but for each lens's rim, where
+// it's displaced by the lens's map, once for each of red, green and blue as
+// the glass disperses, and lit unless the glass paints its own light. Each
+// lens's maps and passes are kept to the lens's own box, as Aave's are, so
+// moving a lens over large content redraws only the lens, and two passes
+// over the whole content put each lens's result in place.
+function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
+  const unit = box ? "objectBoundingBox" : "userSpaceOnUse";
+  const filter = svg("filter", { filterUnits: unit, primitiveUnits: unit, "color-interpolation-filters": "sRGB" });
+  if (box) {
+    for (const [key, value] of Object.entries({ x: 0, y: 0, width: 1, height: 1 })) filter.setAttribute(key, String(value));
+  }
+
+  const single = lenses.length === 1;
+  const parts = lenses.map(({ maps, shine }, k): Part => {
+    // What's merged across lenses keeps a plain name when there's one lens.
+    const merged = (name: string) => (single ? name : `${name}-${k}`);
+    const image = (href: string, result: string) => svg("feImage", { href, preserveAspectRatio: "none", result });
+    const boxed = [
+      image(maps.across, `across-${k}`),
+      image(maps.down, `down-${k}`),
+      image(maps.light, merged("raw")),
+      svg("feFlood", { "flood-color": "rgb(128, 128, 128)", result: `neutral-${k}` }),
+    ];
+    if (standIn) boxed.push(image(maps.shape, merged("shape")));
+    filter.append(...boxed);
+
+    // Each pull, with an alpha of one half for the direction it doesn't pull in.
+    for (const pull of ["across", "down"]) {
+      const half = svg("feComponentTransfer", { in: `${pull}-grey-${k}`, result: `${pull}-pull-${k}` });
+      half.append(svg("feFuncA", { type: "linear", slope: 0, intercept: 0.5 }));
+      filter.append(
+        svg("feComposite", { in: `${pull}-${k}`, in2: `neutral-${k}`, operator: "over", result: `${pull}-grey-${k}` }),
+        half,
+      );
+    }
+    // Each colour keeps a third of its alpha, so content that's partly
+    // transparent adds back up to what it was; its colour is tripled after.
+    // The first pass reads the whole content, so it's kept to the box
+    // outright; what follows from it stays there.
+    const rays = CHANNELS.map((channel, i): [SVGElement, SVGElement] => {
+      const across = svg("feDisplacementMap", {
+        in: "SourceGraphic",
+        in2: `across-pull-${k}`,
+        xChannelSelector: "R",
+        yChannelSelector: "A",
+        result: `across-${k}-${i}`,
+      });
+      const down = svg("feDisplacementMap", {
+        in: `across-${k}-${i}`,
+        in2: `down-pull-${k}`,
+        xChannelSelector: "A",
+        yChannelSelector: "R",
+        result: `ray-${k}-${i}`,
+      });
+      const third = `${channel}  0 0 0 0.3333 0`;
+      boxed.push(across);
+      filter.append(across, down, svg("feColorMatrix", { in: `ray-${k}-${i}`, type: "matrix", values: third, result: `light-${k}-${i}` }));
+      return [across, down];
+    });
+    filter.append(
+      svg("feComposite", { in: `light-${k}-0`, in2: `light-${k}-1`, operator: "arithmetic", k2: 1, k3: 1, result: `light-${k}-01` }),
+      svg("feComposite", { in: `light-${k}-01`, in2: `light-${k}-2`, operator: "arithmetic", k2: 1, k3: 1, result: `spread-${k}` }),
+      svg("feColorMatrix", {
+        in: `spread-${k}`,
+        type: "matrix",
+        values: "3 0 0 0 0  0 3 0 0 0  0 0 3 0 0  0 0 0 1 0",
+        result: `bent-${k}`,
+      }),
+    );
+    // The light on the rim, from its grey: added as white, or on a light page
+    // as shade multiplied in.
+    if (shine > 0) {
+      const white = `0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 1 0 ${-128 / 255}`;
+      filter.append(
+        svg("feColorMatrix", { in: merged("raw"), type: "matrix", values: white, result: `glint-${k}` }),
+        svg("feComposite", { in: `glint-${k}`, in2: `bent-${k}`, operator: "arithmetic", k2: shine, k3: 1, result: `lit-${k}` }),
+      );
+    } else if (shine < 0) {
+      const row = `0 0 ${shine} 0 ${1 - (128 * shine) / 255}`;
+      filter.append(
+        svg("feColorMatrix", { in: merged("raw"), type: "matrix", values: `${row}  ${row}  ${row}  0 0 0 0 1`, result: `shade-${k}` }),
+        svg("feComposite", { in: `shade-${k}`, in2: `bent-${k}`, operator: "arithmetic", k1: 1, result: `lit-${k}` }),
+      );
+    }
+    // Where the map covers, the bent content, split by the map's own alpha.
+    filter.append(svg("feComposite", { in: shine ? `lit-${k}` : `bent-${k}`, in2: merged("raw"), operator: "in", result: merged("inside") }));
+    return { boxed, rays };
+  });
+  if (!single) {
+    for (const name of ["raw", "inside", ...(standIn ? ["shape"] : [])]) {
+      const merge = svg("feMerge", { result: name });
+      lenses.forEach((_, k) => merge.append(svg("feMergeNode", { in: `${name}-${k}` })));
+      filter.append(merge);
+    }
+  }
+  // Elsewhere the content as it was, split by the maps' alpha the other way,
+  // so the two add back up exactly where it fades. A stand-in is then cut to
+  // the lens's shape.
+  filter.append(
+    svg("feComposite", { in: "SourceGraphic", in2: "raw", operator: "out", result: "outside" }),
+    svg("feComposite", { in: "inside", in2: "outside", operator: "arithmetic", k2: 1, k3: 1, result: "seen" }),
+  );
+  if (standIn) filter.append(svg("feComposite", { in: "seen", in2: "shape", operator: "in" }));
+  return { filter, parts };
+}
+
+/** Where a lens stands over its content, in the content's own px, and how far its rim reaches. */
+interface Placed {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  reach: number;
+  dispersion: number;
+}
+
+// Places each lens's maps and passes over content `across` by `down` px.
+function place(graph: Graph, placed: Placed[], across: number, down: number, box: boolean): void {
+  if (!box) {
+    for (const [key, value] of Object.entries({ x: 0, y: 0, width: across, height: down })) {
+      graph.filter.setAttribute(key, String(value));
+    }
+  }
+  placed.forEach((lens, k) => {
+    const part = graph.parts[k]!;
+    const spectrum = [1 + 0.2 * lens.dispersion, 1 + 0.1 * lens.dispersion, 1];
+    part.rays.forEach(([pullAcross, pullDown], i) => {
+      pullAcross.setAttribute("scale", String((box ? lens.reach / across : lens.reach) * spectrum[i]!));
+      pullDown.setAttribute("scale", String((box ? lens.reach / down : lens.reach) * spectrum[i]!));
+    });
+    const rect = box
+      ? { x: lens.x / across, y: lens.y / down, width: lens.width / across, height: lens.height / down }
+      : { x: lens.x, y: lens.y, width: lens.width, height: lens.height };
+    for (const element of part.boxed) {
+      for (const [key, value] of Object.entries(rect)) element.setAttribute(key, String(value));
+    }
+  });
+}
+
+interface Fit {
+  maps: Encoded;
+  /** The maps' key and the light's strength, which together set the filter's shape. */
+  key: string;
+  shine: number;
+  strength: number;
+  width: number;
+  height: number;
+}
+
+/** The glass's size and corner radius, in px, or null while it has no size. */
+export function shapeOf(glass: HTMLElement, style: CSSStyleDeclaration = getComputedStyle(glass)): Shape | null {
+  const width = glass.offsetWidth;
+  const height = glass.offsetHeight;
+  if (!width || !height) return null;
+  const corner = style.borderTopLeftRadius;
+  const radius = Math.min(
+    width / 2,
+    height / 2,
+    corner.endsWith("%") ? (Math.min(width, height) * parseFloat(corner)) / 100 : parseFloat(corner) || 0,
+  );
+  return { width, height, radius };
+}
+
+// Draws the map for the glass's size, shape and light, or takes it from the
+// cache, along with the strength and shine read off the glass.
+function fit(glass: HTMLElement, options: LensOptions): Fit | null {
+  const style = getComputedStyle(glass);
+  const shape = shapeOf(glass, style);
+  if (!shape) return null;
+  const { width, height, radius } = shape;
+  // The page's shine is negative on a light page, where the rim darkens.
+  const page = parseFloat(style.getPropertyValue("--lg-lens-shine")) || 0;
+  const shine = options.paintsLight ? 0 : options.shine === undefined ? page : Math.sign(page) * options.shine;
+  const tuned = options.strengthProperty ? parseFloat(style.getPropertyValue(options.strengthProperty)) : NaN;
+  const own = page > 0 ? (options.darkStrength ?? options.strength) : options.strength;
+  const strength = Number.isFinite(tuned) ? tuned : own;
+  const density = Math.min(devicePixelRatio || 1, 2);
+  // Glass that paints its own light uses only where the map bends, which is
+  // the same on any page.
+  const theme = page < 0 && !options.paintsLight ? LIGHT : DARK;
+  const light = options.edgeWidth === undefined ? theme : { ...theme, edgeWidth: options.edgeWidth };
+  const key = [width, height, radius, density, JSON.stringify(light), JSON.stringify(options)].join("|");
+  const maps = encode(key, () => lensMap(shape, options, light, density));
+  return maps ? { maps, key: `${key}|${shine}`, shine, strength, width, height } : null;
+}
+
+/** Glass that moves over content of its own. */
+export interface Lens {
+  /** Refracts while active, as when the glass is lifted. */
+  setActive(active: boolean): void;
+  /** Call after moving or scaling the glass, to keep the refraction under it. */
+  update(): void;
+  /** Call after the glass changes size or shape, to draw its map again. */
+  refit(): void;
+  destroy(): void;
+}
+
+interface Member {
+  glass: HTMLElement;
+  options: LensOptions;
+  replaces?: HTMLElement;
+  fit?: Fit;
+  placed?: Placed;
+}
+
+/** Content under one or more lenses, and its filter. */
+interface Surface {
+  content: HTMLElement;
+  /** The lenses made over it, active or not. */
+  lenses: number;
+  /** The active ones, in the order they became active. */
+  members: Member[];
+  name: string;
+  /** Whether the content is a stand-in, shown only within its lens. */
+  standIn: boolean;
+  graph?: Graph;
+  built: string;
+  placed: string;
+  version: number;
+}
+
+const surfaces = new Map<HTMLElement, Surface>();
+let made = 0;
+
+// Filters the content for wherever its active lenses stand now, giving the
+// filter a new id whenever any of them has moved.
+function render(surface: Surface): void {
+  const { content } = surface;
+  const across = content.offsetWidth;
+  const down = content.offsetHeight;
+  const from = content.getBoundingClientRect();
+  const shown: Member[] = [];
+  if (across && down) {
+    // Each lens's box in the content's own pixels, past any scale on either.
+    const unit = from.width / across || 1;
+    for (const member of surface.members) {
+      const at = member.glass.getBoundingClientRect();
+      if (!member.fit || !at.width || !at.height) continue;
+      const width = at.width / unit;
+      const height = at.height / unit;
+      const reach = member.fit.strength * Math.min(width, height);
+      const { dispersion } = member.options;
+      member.placed = { x: (at.left - from.left) / unit, y: (at.top - from.top) / unit, width, height, reach, dispersion };
+      shown.push(member);
+    }
+  }
+  if (!shown.length) {
+    surface.placed = "";
+    content.style.removeProperty("filter");
+    if (surface.standIn) content.style.removeProperty("visibility");
+    surface.standIn = false;
+    return;
+  }
+
+  const box = boxUnits();
+  const standIn = shown.some((member) => member.replaces);
+  surface.standIn = standIn;
+  const structure = shown.map((member) => member.fit!.key).join("\n") + (standIn ? "\nstand-in" : "");
+  if (structure !== surface.built || !surface.graph) {
+    surface.graph?.filter.remove();
+    surface.graph = graph(
+      shown.map((member) => member.fit!),
+      box,
+      standIn,
+    );
+    container().append(surface.graph.filter);
+    surface.built = structure;
+    surface.placed = "";
+  }
+  const placed = shown.map((member) => member.placed!);
+  const next = [across, down, ...placed.flatMap(({ x, y, width, height, reach }) => [x, y, width, height, reach])]
+    .map((value) => value.toFixed(2))
+    .join(" ");
+  if (next === surface.placed) return;
+  surface.placed = next;
+  place(surface.graph, placed, across, down, box);
+  surface.graph.filter.id = `${surface.name}-${++surface.version}`;
+  content.style.filter = `url("#${surface.graph.filter.id}")`;
+
+  for (const member of shown) {
+    if (!member.replaces) continue;
+    content.style.visibility = "visible";
+    // What's replaced keeps everything but the lens's shape.
+    const { x, y, width, height } = member.placed!;
+    const behind = member.replaces.getBoundingClientRect();
+    const unit = from.width / across || 1;
+    mask(member.replaces, {
+      image: `url("${member.fit!.maps.shape}"), linear-gradient(#000, #000)`,
+      position: `${x + (from.left - behind.left) / unit}px ${y + (from.top - behind.top) / unit}px, 0 0`,
+      size: `${width}px ${height}px, 100% 100%`,
+    });
+  }
+}
 
 const MASKING = ["image", "position", "size", "repeat", "composite"] as const;
 
@@ -269,227 +608,91 @@ function mask(element: HTMLElement, layers?: { image: string; position: string; 
   }
 }
 
-/** Glass that moves over content of its own. */
-export interface Lens {
-  /** Refracts while active, as when the glass is lifted. */
-  setActive(active: boolean): void;
-  /** Call after moving or scaling the glass, to keep the refraction under it. */
-  update(): void;
-  destroy(): void;
-}
-
-let made = 0;
-
 /**
  * Makes `glass` a lens over `content`, which must have room for the whole
  * lens. Given `replaces`, the content is a stand-in for it under the glass:
  * the content is shown only within the lens (keep it hidden otherwise), and
- * `replaces` is hidden there. The glass's `--lg-lens-shine` sets the light on
- * its rim: above 0 it brightens, below 0 it darkens, as on a light page.
- * Both it and the strength property are read each time the lens becomes
- * active.
+ * `replaces` is hidden there. Unless the glass paints its own light, the
+ * glass's `--lg-lens-shine` sets the light on its rim: above 0 it brightens,
+ * below 0 it darkens, as on a light page. Both it and the strength property
+ * are read each time the lens becomes active or is refitted.
  */
 export function createLens(glass: HTMLElement, content: HTMLElement, options: LensOptions, replaces?: HTMLElement): Lens {
-  const box = boxUnits();
-  const name = `glisse-lens-${made++}`;
+  let surface = surfaces.get(content);
+  if (!surface) {
+    surface = {
+      content,
+      lenses: 0,
+      members: [],
+      name: `glisse-lens-${made++}`,
+      standIn: false,
+      built: "",
+      placed: "",
+      version: 0,
+    };
+    surfaces.set(content, surface);
+  }
+  const shared = surface;
+  shared.lenses++;
+  const member: Member = { glass, options, replaces };
   let active = false;
-  let strength = options.strength;
-  let built = "";
-  let placed = "";
-  let version = 0;
-  let filter: SVGElement | undefined;
-  let images: SVGElement[] = [];
-  let cutout = "";
-  // Each colour's pass across, then down.
-  let rays: [SVGElement, SVGElement][] = [];
 
-  // A filter that leaves the content as it is but for the lens's rim, where
-  // it's displaced by the map, once for each of red, green and blue as the
-  // glass disperses, and lit. Only the map is placed; the rest runs over the
-  // whole content, so nothing else needs lining up with it.
-  const build = (maps: Encoded, shine: number) => {
-    filter?.remove();
-    const unit = box ? "objectBoundingBox" : "userSpaceOnUse";
-    filter = svg("filter", { filterUnits: unit, primitiveUnits: unit, "color-interpolation-filters": "sRGB" });
-    if (box) {
-      for (const [key, value] of Object.entries({ x: 0, y: 0, width: 1, height: 1 })) filter.setAttribute(key, String(value));
-    }
-    const place = (href: string, result: string) => svg("feImage", { href, preserveAspectRatio: "none", result });
-    images = [place(maps.across, "across"), place(maps.down, "down"), place(maps.light, "raw")];
-    filter.append(svg("feFlood", { "flood-color": "rgb(128, 128, 128)", result: "neutral" }), ...images);
-    // Each pull, no pull beyond the map, with an alpha of one half for the
-    // direction it doesn't pull in.
-    for (const pull of ["across", "down"]) {
-      const half = svg("feComponentTransfer", { in: `${pull}-grey`, result: `${pull}-pull` });
-      half.append(svg("feFuncA", { type: "linear", slope: 0, intercept: 0.5 }));
-      filter.append(svg("feComposite", { in: pull, in2: "neutral", operator: "over", result: `${pull}-grey` }), half);
-    }
-    // Each colour keeps a third of its alpha, so content that's partly
-    // transparent adds back up to what it was; its colour is tripled after.
-    rays = CHANNELS.map((channel, i) => {
-      const across = svg("feDisplacementMap", {
-        in: "SourceGraphic",
-        in2: "across-pull",
-        xChannelSelector: "R",
-        yChannelSelector: "A",
-        result: `across-${i}`,
-      });
-      const down = svg("feDisplacementMap", {
-        in: `across-${i}`,
-        in2: "down-pull",
-        xChannelSelector: "A",
-        yChannelSelector: "R",
-        result: `ray-${i}`,
-      });
-      const third = `${channel}  0 0 0 0.3333 0`;
-      filter!.append(across, down, svg("feColorMatrix", { in: `ray-${i}`, type: "matrix", values: third, result: `light-${i}` }));
-      return [across, down];
-    });
-    filter.append(
-      svg("feComposite", { in: "light-0", in2: "light-1", operator: "arithmetic", k2: 1, k3: 1, result: "light-01" }),
-      svg("feComposite", { in: "light-01", in2: "light-2", operator: "arithmetic", k2: 1, k3: 1, result: "spread" }),
-      svg("feColorMatrix", { in: "spread", type: "matrix", values: "3 0 0 0 0  0 3 0 0 0  0 0 3 0 0  0 0 0 1 0", result: "bent" }),
-    );
-    // The light on the rim, from its grey: added as white, or on a light page
-    // as shade multiplied in.
-    if (shine > 0) {
-      const white = `0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 1 0 ${-128 / 255}`;
-      filter.append(
-        svg("feColorMatrix", { in: "raw", type: "matrix", values: white, result: "glint" }),
-        svg("feComposite", { in: "glint", in2: "bent", operator: "arithmetic", k2: shine, k3: 1, result: "lit" }),
-      );
-    } else if (shine < 0) {
-      const row = `0 0 ${shine} 0 ${1 - (128 * shine) / 255}`;
-      filter.append(
-        svg("feColorMatrix", { in: "raw", type: "matrix", values: `${row}  ${row}  ${row}  0 0 0 0 1`, result: "shade" }),
-        svg("feComposite", { in: "shade", in2: "bent", operator: "arithmetic", k1: 1, result: "lit" }),
-      );
-    }
-    // Where the map covers, the bent content; elsewhere the content as it
-    // was. Both are split by the map's own alpha, so they add back up exactly
-    // where it fades. A stand-in is then cut to the lens's shape.
-    filter.append(
-      svg("feComposite", { in: shine ? "lit" : "bent", in2: "raw", operator: "in", result: "inside" }),
-      svg("feComposite", { in: "SourceGraphic", in2: "raw", operator: "out", result: "outside" }),
-      svg("feComposite", { in: "inside", in2: "outside", operator: "arithmetic", k2: 1, k3: 1, result: "seen" }),
-    );
-    cutout = maps.shape;
-    if (replaces) {
-      const outline = place(maps.shape, "shape");
-      images.push(outline);
-      filter.append(outline, svg("feComposite", { in: "seen", in2: "shape", operator: "in" }));
-    }
-    container().append(filter);
-    placed = "";
+  const prepare = () => {
+    member.fit = fit(glass, options) ?? undefined;
   };
 
-  // Draws the map for the glass's size, shape and light, if they've changed.
-  const prepare = (): boolean => {
-    const width = glass.offsetWidth;
-    const height = glass.offsetHeight;
-    if (!width || !height) return false;
-    const style = getComputedStyle(glass);
-    const corner = style.borderTopLeftRadius;
-    const radius = Math.min(
-      width / 2,
-      height / 2,
-      corner.endsWith("%") ? (Math.min(width, height) * parseFloat(corner)) / 100 : parseFloat(corner) || 0,
-    );
-    // The page's shine is negative on a light page, where the rim darkens.
-    const page = parseFloat(style.getPropertyValue("--lg-lens-shine")) || 0;
-    const shine = options.shine === undefined ? page : Math.sign(page) * options.shine;
-    const tuned = options.strengthProperty ? parseFloat(style.getPropertyValue(options.strengthProperty)) : NaN;
-    const own = page > 0 ? (options.darkStrength ?? options.strength) : options.strength;
-    strength = Number.isFinite(tuned) ? tuned : own;
-    const density = Math.min(devicePixelRatio || 1, 2);
-    const key = [width, height, radius, density, shine, ...Object.values(options)].join("|");
-    if (key === built && filter) return true;
-    const theme = page < 0 ? LIGHT : DARK;
-    const light = options.edgeWidth === undefined ? theme : { ...theme, edgeWidth: options.edgeWidth };
-    const maps = encode(key, () => lensMap({ width, height, radius }, options, light, density));
-    if (!maps) return false;
-    built = key;
-    build(maps, shine);
-    return true;
-  };
-
-  const update = () => {
-    if (!active || !filter) return;
-    const across = content.offsetWidth;
-    const down = content.offsetHeight;
-    const from = content.getBoundingClientRect();
-    const at = glass.getBoundingClientRect();
-    if (!across || !down || !at.width || !at.height) return;
-    // The glass's box in the content's own pixels, past any scale on both.
-    const unit = from.width / across || 1;
-    const x = (at.left - from.left) / unit;
-    const y = (at.top - from.top) / unit;
-    const width = at.width / unit;
-    const height = at.height / unit;
-    const next = [x, y, width, height, across, down].map((value) => value.toFixed(2)).join(" ");
-    if (next === placed) return;
-    placed = next;
-
-    const reach = strength * Math.min(width, height);
-    const spectrum = [1 + 0.2 * options.dispersion, 1 + 0.1 * options.dispersion, 1];
-    let rect: Record<string, number>;
-    if (box) {
-      rays.forEach(([pullAcross, pullDown], i) => {
-        pullAcross.setAttribute("scale", String((reach / across) * spectrum[i]!));
-        pullDown.setAttribute("scale", String((reach / down) * spectrum[i]!));
-      });
-      rect = { x: x / across, y: y / down, width: width / across, height: height / down };
-    } else {
-      const region = { x: 0, y: 0, width: across, height: down };
-      for (const [key, value] of Object.entries(region)) filter.setAttribute(key, String(value));
-      rays.forEach((pair, i) => {
-        for (const ray of pair) ray.setAttribute("scale", String(reach * spectrum[i]!));
-      });
-      rect = { x, y, width, height };
-    }
-    for (const placing of images) {
-      for (const [key, value] of Object.entries(rect)) placing.setAttribute(key, String(value));
-    }
-    filter.id = `${name}-${++version}`;
-    content.style.filter = `url("#${filter.id}")`;
-
-    if (replaces) {
-      content.style.visibility = "visible";
-      // What's replaced keeps everything but the lens's shape.
-      const behind = replaces.getBoundingClientRect();
-      const left = (at.left - behind.left) / unit;
-      const top = (at.top - behind.top) / unit;
-      mask(replaces, {
-        image: `url("${cutout}"), linear-gradient(#000, #000)`,
-        position: `${left}px ${top}px, 0 0`,
-        size: `${width}px ${height}px, 100% 100%`,
-      });
-    }
-  };
-
-  const clear = () => {
-    placed = "";
-    content.style.removeProperty("filter");
-    content.style.removeProperty("visibility");
-    if (replaces) mask(replaces);
-  };
-
-  return {
+  const lens: Lens = {
     setActive(next) {
       if (next === active) return;
       active = next;
-      if (active && prepare()) {
-        placed = "";
-        update();
-      } else if (!active) {
-        clear();
+      if (active) {
+        shared.members.push(member);
+        prepare();
+      } else {
+        shared.members.splice(shared.members.indexOf(member), 1);
+        if (replaces) mask(replaces);
       }
+      render(shared);
     },
-    update,
+    update() {
+      if (active) render(shared);
+    },
+    refit() {
+      if (!active) return;
+      prepare();
+      render(shared);
+    },
     destroy() {
-      active = false;
-      filter?.remove();
-      clear();
+      lens.setActive(false);
+      if (--shared.lenses > 0) return;
+      shared.graph?.filter.remove();
+      surfaces.delete(content);
     },
   };
+  return lens;
+}
+
+const backdrops = new Map<string, string>();
+
+/**
+ * Fits glass that bends its own backdrop, as only Chromium can: a lens's
+ * filter drawn for the glass's box, set as `--lg-filter` for its
+ * `backdrop-filter`.
+ */
+export function fitBackdropLens(glass: HTMLElement, options: LensOptions): void {
+  const fitted = fit(glass, options);
+  if (!fitted) return;
+  const { maps, key, shine, strength, width, height } = fitted;
+  const reach = strength * Math.min(width, height);
+  const id = `${key}|${reach}`;
+  let name = backdrops.get(id);
+  if (!name) {
+    const built = graph([{ maps, shine }], false, false);
+    place(built, [{ x: 0, y: 0, width, height, reach, dispersion: options.dispersion }], width, height, false);
+    name = `glisse-backdrop-${backdrops.size}`;
+    built.filter.id = name;
+    container().append(built.filter);
+    backdrops.set(id, name);
+  }
+  glass.style.setProperty("--lg-filter", `url("#${name}") saturate(1.5)`);
 }
