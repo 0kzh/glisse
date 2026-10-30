@@ -66,7 +66,30 @@ export interface LensOptions {
    * the frost doesn't blur it.
    */
   paintsLight?: boolean;
+  /**
+   * Whether the content is ink, such as labels, over whatever is under it.
+   * Ink's colour is mostly its alpha, which red, green and blue share, so
+   * split as it is it only blurs. As ink it's drawn as two layers that add
+   * up to the ink drawn as usual, each laid on paper and split: how much of
+   * each colour it covers, black on white, multiplied in; and the colour it
+   * adds, on black, added. Make a lens for each over its own copy of the
+   * content, the `"cover"` copy first, then the `"glow"`.
+   */
+  ink?: boolean;
+  /** Softens what the rim bends, as iOS's tab bar lens does, by a Gaussian blur of this deviation in px. */
+  blur?: number;
 }
+
+/** One of ink's two layers: see `LensOptions.ink`. */
+export type Ink = "cover" | "glow";
+
+// The glow is added to what's under it, where the browser can; screened
+// elsewhere, which differs only part way across the ink's edges.
+let adds: boolean | undefined;
+const glowBlend = (): string => {
+  adds ??= typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("mix-blend-mode", "plus-lighter");
+  return adds ? "plus-lighter" : "screen";
+};
 
 /** Where the light catches the rim. */
 export interface Light {
@@ -136,7 +159,7 @@ export interface LensMap {
   down: Uint8ClampedArray;
   /** Greys of the light caught (128 is none), with alpha covering where the lens bends at all. */
   light: Uint8ClampedArray;
-  /** White, with alpha covering the lens's whole shape. */
+  /** Greys of how much the rim bends, lightest at the rim, with alpha covering the lens's whole shape. */
   shape: Uint8ClampedArray;
 }
 
@@ -189,7 +212,8 @@ export function lensMap(shape: Shape, options: LensOptions, light: Light, densit
       const y = ((row + 0.5) / rows) * height - halfHeight;
       const edge = distance(x, y, halfWidth, halfHeight, radius);
       // Smoothed over the last pixel at the edge.
-      grey(shapeMask, i, 255, Math.round(255 * clamp(-edge, 0, 1)));
+      const inside = Math.round(255 * clamp(-edge, 0, 1));
+      grey(shapeMask, i, 0, inside);
       if (edge >= 0) {
         grey(pullAcross, i, 128);
         grey(pullDown, i, 128);
@@ -220,6 +244,7 @@ export function lensMap(shape: Shape, options: LensOptions, light: Light, densit
       }
 
       const falloff = 0.5 * (1 + erf(distance(x, y, innerWidth, innerHeight, innerRadius) * ramp));
+      grey(shapeMask, i, Math.round(255 * falloff), inside);
       grey(pullAcross, i, Math.round((0.5 - 0.5 * dx * falloff) * 255));
       grey(pullDown, i, Math.round((0.5 - 0.5 * dy * falloff) * 255));
 
@@ -284,6 +309,8 @@ interface Part {
   boxed: SVGElement[];
   /** Each colour's pass across, then down. */
   rays: [SVGElement, SVGElement][];
+  /** The blur over what the rim bends, if any, sized in place(). */
+  soften?: SVGElement;
 }
 
 /** A lens's filter, for one or more lenses over the same content. */
@@ -296,6 +323,8 @@ interface Graph {
 interface Bend {
   maps: Encoded;
   shine: number;
+  ink?: Ink;
+  blur?: number;
 }
 
 // A filter that leaves the content as it is but for each lens's rim, where
@@ -303,16 +332,30 @@ interface Bend {
 // the glass disperses, and lit unless the glass paints its own light. Each
 // lens's maps and passes are kept to the lens's own box, as Aave's are, so
 // moving a lens over large content redraws only the lens, and two passes
-// over the whole content put each lens's result in place.
+// over the whole content put each lens's result in place. Ink is laid on
+// paper (see `LensOptions.ink`): each colour of each ray as it's split, and
+// the content left as it is all at once. Covering ink is black, so only its
+// alpha counts.
 function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
   const unit = box ? "objectBoundingBox" : "userSpaceOnUse";
   const filter = svg("filter", { filterUnits: unit, primitiveUnits: unit, "color-interpolation-filters": "sRGB" });
   if (box) {
     for (const [key, value] of Object.entries({ x: 0, y: 0, width: 1, height: 1 })) filter.setAttribute(key, String(value));
   }
+  const ink = lenses[0]?.ink;
+  const source = ink === "cover" ? "ink" : "SourceGraphic";
+  if (ink === "cover") {
+    filter.append(svg("feColorMatrix", { in: "SourceGraphic", type: "matrix", values: "0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", result: "ink" }));
+  }
+  if (ink) {
+    filter.append(
+      svg("feFlood", { "flood-color": ink === "cover" ? "#fff" : "#000", result: "paper" }),
+      svg("feComposite", { in: source, in2: "paper", operator: "over", result: "laid" }),
+    );
+  }
 
   const single = lenses.length === 1;
-  const parts = lenses.map(({ maps, shine }, k): Part => {
+  const parts = lenses.map(({ maps, shine, blur }, k): Part => {
     // What's merged across lenses keeps a plain name when there's one lens.
     const merged = (name: string) => (single ? name : `${name}-${k}`);
     const image = (href: string, result: string) => svg("feImage", { href, preserveAspectRatio: "none", result });
@@ -334,13 +377,25 @@ function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
         half,
       );
     }
+    // The shade on a light page's rim, from the light's grey. The glow of
+    // ink takes it before it's laid on paper, so it shades the ink, not the
+    // paper. Where a dark page's rim is lit, the light covers what's under
+    // it as it adds to it, so covering ink takes that light as shade.
+    const darkens = ink === "cover" ? -Math.max(shine, 0) : Math.min(shine, 0);
+    if (darkens < 0) {
+      const row = `0 0 ${darkens} 0 ${1 - (128 * darkens) / 255}`;
+      filter.append(svg("feColorMatrix", { in: merged("raw"), type: "matrix", values: `${row}  ${row}  ${row}  0 0 0 0 1`, result: `shade-${k}` }));
+    }
+
     // Each colour keeps a third of its alpha, so content that's partly
     // transparent adds back up to what it was; its colour is tripled after.
     // The first pass reads the whole content, so it's kept to the box
-    // outright; what follows from it stays there.
+    // outright; what follows from it stays there. Ink's paper covers the
+    // whole content, so a blur near the box's edge reads paper, which leaves
+    // what's under it as it is.
     const rays = CHANNELS.map((channel, i): [SVGElement, SVGElement] => {
       const across = svg("feDisplacementMap", {
-        in: "SourceGraphic",
+        in: source,
         in2: `across-pull-${k}`,
         xChannelSelector: "R",
         yChannelSelector: "A",
@@ -355,7 +410,19 @@ function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
       });
       const third = `${channel}  0 0 0 0.3333 0`;
       boxed.push(across);
-      filter.append(across, down, svg("feColorMatrix", { in: `ray-${k}-${i}`, type: "matrix", values: third, result: `light-${k}-${i}` }));
+      filter.append(across, down);
+      let ray = `ray-${k}-${i}`;
+      if (ink) {
+        const steps = [];
+        if (ink === "glow" && darkens < 0) {
+          steps.push(svg("feComposite", { in: ray, in2: `shade-${k}`, operator: "arithmetic", k1: 1, result: `shaded-${k}-${i}` }));
+          ray = `shaded-${k}-${i}`;
+        }
+        steps.push(svg("feComposite", { in: ray, in2: "paper", operator: "over", result: `laid-${k}-${i}` }));
+        ray = `laid-${k}-${i}`;
+        filter.append(...steps);
+      }
+      filter.append(svg("feColorMatrix", { in: ray, type: "matrix", values: third, result: `light-${k}-${i}` }));
       return [across, down];
     });
     filter.append(
@@ -368,24 +435,39 @@ function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
         result: `bent-${k}`,
       }),
     );
+    // The blur, laid on as far as the rim bends: from the shape map's grey.
+    let soften: SVGElement | undefined;
+    if (blur) {
+      soften = svg("feGaussianBlur", { in: `bent-${k}`, result: `soft-${k}` });
+      const weight = image(maps.shape, `weight-${k}`);
+      boxed.push(weight);
+      filter.append(
+        weight,
+        svg("feColorMatrix", { in: `weight-${k}`, type: "matrix", values: "0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0", result: `bends-${k}` }),
+        soften,
+        svg("feComposite", { in: `soft-${k}`, in2: `bends-${k}`, operator: "in", result: `soft-in-${k}` }),
+        svg("feComposite", { in: `bent-${k}`, in2: `bends-${k}`, operator: "out", result: `sharp-${k}` }),
+        svg("feComposite", { in: `soft-in-${k}`, in2: `sharp-${k}`, operator: "arithmetic", k2: 1, k3: 1, result: `softened-${k}` }),
+      );
+    }
+    const bent = blur ? `softened-${k}` : `bent-${k}`;
     // The light on the rim, from its grey: added as white, or on a light page
-    // as shade multiplied in.
-    if (shine > 0) {
+    // as shade multiplied in, which glowing ink has taken already.
+    let lit = bent;
+    if (shine > 0 && ink !== "cover") {
       const white = `0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 1 0 ${-128 / 255}`;
       filter.append(
         svg("feColorMatrix", { in: merged("raw"), type: "matrix", values: white, result: `glint-${k}` }),
-        svg("feComposite", { in: `glint-${k}`, in2: `bent-${k}`, operator: "arithmetic", k2: shine, k3: 1, result: `lit-${k}` }),
+        svg("feComposite", { in: `glint-${k}`, in2: bent, operator: "arithmetic", k2: shine, k3: 1, result: `lit-${k}` }),
       );
-    } else if (shine < 0) {
-      const row = `0 0 ${shine} 0 ${1 - (128 * shine) / 255}`;
-      filter.append(
-        svg("feColorMatrix", { in: merged("raw"), type: "matrix", values: `${row}  ${row}  ${row}  0 0 0 0 1`, result: `shade-${k}` }),
-        svg("feComposite", { in: `shade-${k}`, in2: `bent-${k}`, operator: "arithmetic", k1: 1, result: `lit-${k}` }),
-      );
+      lit = `lit-${k}`;
+    } else if (darkens < 0 && ink !== "glow") {
+      filter.append(svg("feComposite", { in: `shade-${k}`, in2: bent, operator: "arithmetic", k1: 1, result: `lit-${k}` }));
+      lit = `lit-${k}`;
     }
     // Where the map covers, the bent content, split by the map's own alpha.
-    filter.append(svg("feComposite", { in: shine ? `lit-${k}` : `bent-${k}`, in2: merged("raw"), operator: "in", result: merged("inside") }));
-    return { boxed, rays };
+    filter.append(svg("feComposite", { in: lit, in2: merged("raw"), operator: "in", result: merged("inside") }));
+    return { boxed, rays, soften };
   });
   if (!single) {
     for (const name of ["raw", "inside", ...(standIn ? ["shape"] : [])]) {
@@ -398,7 +480,7 @@ function graph(lenses: Bend[], box: boolean, standIn: boolean): Graph {
   // so the two add back up exactly where it fades. A stand-in is then cut to
   // the lens's shape.
   filter.append(
-    svg("feComposite", { in: "SourceGraphic", in2: "raw", operator: "out", result: "outside" }),
+    svg("feComposite", { in: ink ? "laid" : "SourceGraphic", in2: "raw", operator: "out", result: "outside" }),
     svg("feComposite", { in: "inside", in2: "outside", operator: "arithmetic", k2: 1, k3: 1, result: "seen" }),
   );
   if (standIn) filter.append(svg("feComposite", { in: "seen", in2: "shape", operator: "in" }));
@@ -413,6 +495,7 @@ interface Placed {
   height: number;
   reach: number;
   dispersion: number;
+  blur: number;
 }
 
 // Places each lens's maps and passes over content `across` by `down` px.
@@ -429,6 +512,9 @@ function place(graph: Graph, placed: Placed[], across: number, down: number, box
       pullAcross.setAttribute("scale", String((box ? lens.reach / across : lens.reach) * spectrum[i]!));
       pullDown.setAttribute("scale", String((box ? lens.reach / down : lens.reach) * spectrum[i]!));
     });
+    // A blur of nothing is a tiny one: some browsers draw nothing at all for 0.
+    const blur = Math.max(lens.blur, 0.01);
+    part.soften?.setAttribute("stdDeviation", box ? `${blur / across} ${blur / down}` : String(blur));
     const rect = box
       ? { x: lens.x / across, y: lens.y / down, width: lens.width / across, height: lens.height / down }
       : { x: lens.x, y: lens.y, width: lens.width, height: lens.height };
@@ -443,6 +529,7 @@ interface Fit {
   /** The maps' key and the light's strength, which together set the filter's shape. */
   key: string;
   shine: number;
+  blur: number;
   strength: number;
   dispersion: number;
   width: number;
@@ -485,15 +572,20 @@ function fit(glass: HTMLElement, options: LensOptions): Fit | null {
   const light = options.edgeWidth === undefined ? theme : { ...theme, edgeWidth: options.edgeWidth };
   const key = [width, height, radius, density, JSON.stringify(light), JSON.stringify(options)].join("|");
   const maps = encode(key, () => lensMap(shape, options, light, density));
-  return maps ? { maps, key: `${key}|${shine}`, shine, strength, dispersion, width, height } : null;
+  const blur = options.blur ?? 0;
+  return maps ? { maps, key: `${key}|${shine}`, shine, blur, strength, dispersion, width, height } : null;
 }
 
 /** Glass that moves over content of its own. */
 export interface Lens {
   /** Refracts while active, as when the glass is lifted. */
   setActive(active: boolean): void;
-  /** Call after moving or scaling the glass, to keep the refraction under it. */
-  update(): void;
+  /**
+   * Call after moving or scaling the glass, to keep the refraction under it.
+   * `amount`, from 0 to 1, is how far it bends now, as when it lifts: its
+   * bend and blur grow with it. It stays as it was when left out.
+   */
+  update(amount?: number): void;
   /** Call after the glass changes size or shape, to draw its map again. */
   refit(): void;
   destroy(): void;
@@ -503,6 +595,10 @@ interface Member {
   glass: HTMLElement;
   options: LensOptions;
   replaces?: HTMLElement;
+  /** Which of ink's layers its content is, if it's ink. */
+  ink?: Ink;
+  /** How far it bends now, from 0 to 1. */
+  amount: number;
   fit?: Fit;
   placed?: Placed;
 }
@@ -542,15 +638,17 @@ function render(surface: Surface): void {
       if (!member.fit || !at.width || !at.height) continue;
       const width = at.width / unit;
       const height = at.height / unit;
-      const reach = member.fit.strength * Math.min(width, height);
+      const reach = member.fit.strength * Math.min(width, height) * member.amount;
       const { dispersion } = member.fit;
-      member.placed = { x: (at.left - from.left) / unit, y: (at.top - from.top) / unit, width, height, reach, dispersion };
+      const blur = member.fit.blur * member.amount;
+      member.placed = { x: (at.left - from.left) / unit, y: (at.top - from.top) / unit, width, height, reach, dispersion, blur };
       shown.push(member);
     }
   }
   if (!shown.length) {
     surface.placed = "";
     content.style.removeProperty("filter");
+    content.style.removeProperty("mix-blend-mode");
     if (surface.standIn) content.style.removeProperty("visibility");
     surface.standIn = false;
     return;
@@ -559,11 +657,11 @@ function render(surface: Surface): void {
   const box = boxUnits();
   const standIn = shown.some((member) => member.replaces);
   surface.standIn = standIn;
-  const structure = shown.map((member) => member.fit!.key).join("\n") + (standIn ? "\nstand-in" : "");
+  const structure = shown.map((member) => `${member.fit!.key}|${member.ink}`).join("\n") + (standIn ? "\nstand-in" : "");
   if (structure !== surface.built || !surface.graph) {
     surface.graph?.filter.remove();
     surface.graph = graph(
-      shown.map((member) => member.fit!),
+      shown.map(({ fit, ink }) => ({ ...fit!, ink })),
       box,
       standIn,
     );
@@ -575,7 +673,7 @@ function render(surface: Surface): void {
   const next = [
     across,
     down,
-    ...placed.flatMap(({ x, y, width, height, reach, dispersion }) => [x, y, width, height, reach, dispersion]),
+    ...placed.flatMap(({ x, y, width, height, reach, dispersion, blur }) => [x, y, width, height, reach, dispersion, blur]),
   ]
     .map((value) => value.toFixed(2))
     .join(" ");
@@ -584,6 +682,9 @@ function render(surface: Surface): void {
   place(surface.graph, placed, across, down, box);
   surface.graph.filter.id = `${surface.name}-${++surface.version}`;
   content.style.filter = `url("#${surface.graph.filter.id}")`;
+  const ink = shown[0]!.ink;
+  if (ink) content.style.setProperty("mix-blend-mode", ink === "cover" ? "multiply" : glowBlend());
+  else content.style.removeProperty("mix-blend-mode");
 
   for (const member of shown) {
     if (!member.replaces) continue;
@@ -626,7 +727,7 @@ function mask(element: HTMLElement, layers?: { image: string; position: string; 
  * below 0 it darkens, as on a light page. Both it and the strength property
  * are read each time the lens becomes active or is refitted.
  */
-export function createLens(glass: HTMLElement, content: HTMLElement, options: LensOptions, replaces?: HTMLElement): Lens {
+export function createLens(glass: HTMLElement, content: HTMLElement, options: LensOptions, replaces?: HTMLElement, ink?: Ink): Lens {
   let surface = surfaces.get(content);
   if (!surface) {
     surface = {
@@ -643,7 +744,7 @@ export function createLens(glass: HTMLElement, content: HTMLElement, options: Le
   }
   const shared = surface;
   shared.lenses++;
-  const member: Member = { glass, options, replaces };
+  const member: Member = { glass, options, replaces, ink: options.ink ? ink : undefined, amount: 1 };
   let active = false;
 
   const prepare = () => {
@@ -663,7 +764,8 @@ export function createLens(glass: HTMLElement, content: HTMLElement, options: Le
       }
       render(shared);
     },
-    update() {
+    update(amount) {
+      if (amount !== undefined) member.amount = clamp(amount, 0, 1);
       if (active) render(shared);
     },
     refit() {
@@ -679,6 +781,63 @@ export function createLens(glass: HTMLElement, content: HTMLElement, options: Le
     },
   };
   return lens;
+}
+
+/** Glass that bends its own backdrop with a lens whose bend grows and shrinks, as only Chromium can. */
+export interface BackdropLens {
+  /** How far it bends now, from 0 to 1, as when it lifts. */
+  update(amount: number): void;
+  /** Call when the glass changes size or shape, or its page's theme, to draw its map again. */
+  refit(): void;
+  destroy(): void;
+}
+
+/**
+ * Bends the glass's backdrop with the same lens, unlit, as the glass bends
+ * content of its own: a filter of its own, set as `--lg-filter` for its
+ * `backdrop-filter`, rescaled as its bend grows. Its maps are those of the
+ * glass's other lenses with the same options, so cost nothing more.
+ */
+export function createBackdropLens(glass: HTMLElement, options: LensOptions): BackdropLens {
+  const name = `glisse-bend-${made++}`;
+  let fitted: Fit | null = null;
+  let built: Graph | null = null;
+  let key = "";
+  let amount = 0;
+  let version = 0;
+  const draw = () => {
+    if (!fitted || !built) return;
+    const { width, height, strength, dispersion, blur } = fitted;
+    const reach = strength * Math.min(width, height) * amount;
+    place(built, [{ x: 0, y: 0, width, height, reach, dispersion, blur: blur * amount }], width, height, false);
+    built.filter.id = `${name}-${++version}`;
+    glass.style.setProperty("--lg-filter", `url("#${built.filter.id}")`);
+  };
+  return {
+    update(next) {
+      // In twentieths: each change rebuilds the backdrop's filter.
+      next = Math.round(clamp(next, 0, 1) * 20) / 20;
+      if (next === amount) return;
+      amount = next;
+      draw();
+    },
+    refit() {
+      fitted = fit(glass, options);
+      if (!fitted) return;
+      if (fitted.key !== key) {
+        built?.filter.remove();
+        built = graph([{ maps: fitted.maps, shine: 0, blur: fitted.blur }], false, false);
+        container().append(built.filter);
+        key = fitted.key;
+      }
+      draw();
+    },
+    destroy() {
+      built?.filter.remove();
+      built = null;
+      glass.style.removeProperty("--lg-filter");
+    },
+  };
 }
 
 const backdrops = new Map<string, string>();
@@ -697,7 +856,7 @@ export function fitBackdropLens(glass: HTMLElement, options: LensOptions): void 
   let name = backdrops.get(id);
   if (!name) {
     const built = graph([{ maps, shine }], false, false);
-    place(built, [{ x: 0, y: 0, width, height, reach, dispersion }], width, height, false);
+    place(built, [{ x: 0, y: 0, width, height, reach, dispersion, blur: 0 }], width, height, false);
     name = `glisse-backdrop-${backdrops.size}`;
     built.filter.id = name;
     container().append(built.filter);

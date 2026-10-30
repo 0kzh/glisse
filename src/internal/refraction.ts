@@ -289,18 +289,23 @@ function bend(element: HTMLElement, source: HTMLElement): Fitting {
  * behind it is filtered, in every browser, with the glass's lens placed
  * where the glass stands. Over anything else, Chromium filters the live
  * backdrop with the same lens, and other browsers keep the frost and the lit
- * rim. `selection` is the tab bar's lifted lens, whose own bend is below.
+ * rim. `selection` is the tab bar's lifted lens, whose own bend is below;
+ * with `bendsBackdrop` false it only takes its rims, and bends its backdrop
+ * itself.
  *
  * The glass reads its settings (--lg-glass-bend, --lg-glass-dispersion,
  * --lg-rim-shine) when it fits, and again each time it renders, so settings
  * set from React, on it or above it, take effect at once.
  */
-export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false): void {
+export function useRefraction(ref: RefObject<HTMLElement | null>, selection = false, bendsBackdrop = true): void {
   const refit = useRef<(() => void) | null>(null);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    if (selection) return refitting(element, () => fitSelection(element, refractsBackdrop()), SELECTION_PROPERTIES).stop;
+    if (selection) {
+      const properties = bendsBackdrop ? SELECTION_PROPERTIES : SELECTION_PROPERTIES.filter((name) => name !== "--lg-filter");
+      return refitting(element, () => fitSelection(element, bendsBackdrop && refractsBackdrop()), properties).stop;
+    }
     const source = findBackdrop(element);
     const fitting = source
       ? bend(element, source)
@@ -320,16 +325,17 @@ export function useRefraction(ref: RefObject<HTMLElement | null>, selection = fa
       fitting.stop();
       element.removeAttribute("data-rim");
     };
-  }, [ref, selection]);
+  }, [ref, selection, bendsBackdrop]);
   // After every render: cheap when nothing changed, as the maps are cached.
   useEffect(() => refit.current?.());
 }
 
-// The tab bar's lifted lens, on a light page, bends the bar's glass and the
-// page behind it where the browser can, as iOS 26.1's held lens does: by
-// Snell's law through a squircle rim (https://kube.io/blog/liquid-glass-css-svg/),
-// pushed outwards, split into red, green and blue, with iOS's brighter rim.
-// The labels it bends with a lens of its own (see tab-bar.tsx).
+// A segmented control's lifted lens, on a light page, bends the track and the
+// page behind it where the browser can: by Snell's law through a squircle rim
+// (https://kube.io/blog/liquid-glass-css-svg/), pushed outwards, split into
+// red, green and blue. Both its and the tab bar's lifted lenses take iOS's
+// brighter rim from here; the tab bar bends its backdrop with the same lens
+// as its labels (see segments.tsx).
 
 const SELECTION_PROPERTIES = ["--lg-filter", "--lg-rim", "--lg-rim-bright"];
 

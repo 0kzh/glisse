@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { Slider, Switch, TabBar } from "../src";
-import { lensMap } from "../src/internal/lens";
+import { createLens, lensMap } from "../src/internal/lens";
 
 const light = { angle: 45, glow: 0.4, spread: 0.5, glowPower: 1.5, edge: 0.5, edgeWidth: 2, edgePower: 1.5 };
 const options = { strength: 0.44, dispersion: 1, depth: 2, dome: 6, splay: 0.4 };
@@ -40,6 +40,11 @@ test("bends only the rim of the lens, pulling content in from the middle", () =>
   const caught = map.light.filter((_, i) => i % 4 === 0);
   expect(Math.max(...caught)).toBeGreaterThan(160);
   expect(at(map.light, columns / 2, middle)[0]).toBe(128);
+
+  // The shape's grey is how much the rim bends there: most at the rim, none in the middle.
+  expect(at(map.shape, columns / 2, middle)[0]).toBe(0);
+  expect(at(map.shape, columns - 2, middle)[0]).toBeGreaterThan(128);
+  expect(at(map.shape, columns / 2, middle)[3]).toBe(255);
 });
 
 test("glass's band and dome scale with its size", () => {
@@ -224,4 +229,59 @@ test("a lifted tab bar lens shows the labels in full colour, refracted, in place
   expect(bar.hasAttribute("data-lensing")).toBe(false);
   expect(lensed.style.filter).toBe("");
   expect(labels.style.getPropertyValue("mask-image")).toBe("");
+});
+
+test("a lifted tab bar lens splits its labels into colours as ink, in two layers that add up to them", () => {
+  browse(CHROME);
+  const items = [
+    { value: "day", label: "Day" },
+    { value: "week", label: "Week" },
+  ];
+  const { container } = render(<TabBar aria-label="Range" items={items} defaultValue="day" />);
+  const bar = container.querySelector<HTMLElement>(".lg-tab-bar")!;
+  const lens = bar.querySelector<HTMLElement>(".lg-tab-lens")!;
+  const [cover, glow] = [...bar.querySelectorAll<HTMLElement>(".lg-tab-lensed")];
+  bar.style.padding = "4px";
+  vi.spyOn(bar, "clientWidth", "get").mockReturnValue(176);
+
+  // Light, then dark, each on a tab that isn't selected, so it settles at once.
+  for (const [shine, name] of [["-1.5", "Week"], ["1", "Day"]] as const) {
+    lens.style.setProperty("--lg-lens-shine", shine);
+    fireEvent.pointerDown(screen.getByRole("tab", { name }), pointer);
+    // What the labels cover, black on white, multiplied in.
+    const covering = filterOf(cover!)!;
+    expect(covering.querySelector('feColorMatrix[result="ink"]')).not.toBeNull();
+    expect(covering.querySelector('feFlood[result="paper"]')?.getAttribute("flood-color")).toBe("#fff");
+    expect(cover!.style.getPropertyValue("mix-blend-mode")).toBe("multiply");
+    // What they add, on black, added.
+    const glowing = filterOf(glow!)!;
+    expect(glowing.querySelector('feFlood[result="paper"]')?.getAttribute("flood-color")).toBe("#000");
+    expect(["plus-lighter", "screen"]).toContain(glow!.style.getPropertyValue("mix-blend-mode"));
+    // Both are softened at the rim, and red bends further than blue.
+    expect(glowing.querySelector("feGaussianBlur")).not.toBeNull();
+    const scales = [...glowing.querySelectorAll("feDisplacementMap")].map((map) => Number(map.getAttribute("scale")));
+    expect(scales[0]! / scales[4]!).toBeCloseTo(1.4);
+    fireEvent.pointerUp(window, pointer);
+    expect(cover!.style.getPropertyValue("mix-blend-mode")).toBe("");
+    expect(glow!.style.getPropertyValue("mix-blend-mode")).toBe("");
+  }
+});
+
+test("a lens bends as far as it has lifted", () => {
+  browse(CHROME);
+  const glass = document.createElement("div");
+  const content = document.createElement("div");
+  document.body.append(glass, content);
+  const lens = createLens(glass, content, { strength: 0.3, dispersion: 0, depth: 2, dome: 0, splay: 1 });
+  lens.setActive(true);
+  const reach = () => Number(filterOf(content)!.querySelector("feDisplacementMap")!.getAttribute("scale"));
+  const full = reach();
+  expect(full).toBeGreaterThan(0);
+  lens.update(0.5);
+  expect(reach()).toBeCloseTo(full / 2);
+  lens.update(0);
+  expect(reach()).toBe(0);
+  lens.destroy();
+  glass.remove();
+  content.remove();
 });

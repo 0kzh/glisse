@@ -471,10 +471,30 @@
    can (--lg-filter), and takes iOS's brighter rim. The labels it bends on its
    own, so they bend once. At rest it lies over the labels, as before. */
 :is(.lg-tab-bar, .lg-segmented)[data-refracting][data-light] .lg-tab-lens.lg-glass {
-  z-index: 0;
   background-image: var(--lg-rim-bright, var(--lg-rim, none));
+}
+
+.lg-segmented[data-refracting][data-light] .lg-tab-lens.lg-glass,
+.lg-tab-bar[data-under][data-light] .lg-tab-lens.lg-glass {
+  z-index: 0;
   -webkit-backdrop-filter: var(--lg-filter, none);
   backdrop-filter: var(--lg-filter, none);
+}
+
+/* A tab bar's lens on a light page changes over with its lift, so the
+   selected label never changes colour at once: the grey of the selection,
+   which lies over the label at rest, fades as the lens lifts (--lg-rest),
+   the lens drops under the labels once it's gone (data-under), and only then
+   does its fill come in (--lg-under), as its bend does. Settling, the same
+   in reverse. */
+.lg-tab-bar[data-light] .lg-tab-lens::before {
+  opacity: var(--lg-rest, 1);
+  transition: none;
+}
+
+.lg-tab-bar[data-light] .lg-tab-lens.lg-glass {
+  background-color: color-mix(in srgb, var(--lg-lens) calc(var(--lg-under, 0) * 100%), transparent);
+  transition: opacity 140ms ease;
 }
 
 :is(.lg-tab-bar, .lg-segmented)[data-hidden] :is(.lg-tab-lens, .lg-tab-tint, .lg-segmented-thumb),
