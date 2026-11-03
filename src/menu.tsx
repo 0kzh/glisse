@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
 
 import { Button } from "./button";
+import { useControllable } from "./internal/controllable";
 import { cx } from "./internal/cx";
 import { createSpring, type Spring } from "./internal/spring";
 
@@ -22,6 +23,11 @@ export interface MenuProps {
   icon?: ReactNode;
   /** The trigger edge the menu lines up with as it opens across it. */
   align?: "start" | "end";
+  /** Whether the menu is open. Pass it with `onOpenChange` to open and close the menu yourself. */
+  open?: boolean;
+  defaultOpen?: boolean;
+  /** Called when the trigger, Escape, Tab, a chosen item or a press outside asks to open or close the menu. */
+  onOpenChange?: (open: boolean) => void;
   className?: string;
   style?: CSSProperties;
 }
@@ -39,8 +45,21 @@ const ellipsis = (
   </svg>
 );
 
-export function Menu({ items, "aria-label": label, icon = ellipsis, align = "end", className, style }: MenuProps): JSX.Element {
-  const [phase, setPhase] = useState<Phase>("closed");
+export function Menu({
+  items,
+  "aria-label": label,
+  icon = ellipsis,
+  align = "end",
+  open: openProp,
+  defaultOpen = false,
+  onOpenChange,
+  className,
+  style,
+}: MenuProps): JSX.Element {
+  const [open, setOpen] = useControllable(openProp, defaultOpen, onOpenChange);
+  // `open` is whether the menu should be open; the phase follows it, and keeps
+  // the menu mounted while its glass runs back into the trigger.
+  const [phase, setPhase] = useState<Phase>(open ? "open" : "closed");
   const triggerRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLSpanElement>(null);
@@ -48,12 +67,23 @@ export function Menu({ items, "aria-label": label, icon = ellipsis, align = "end
   const contentRef = useRef<HTMLDivElement>(null);
   const plateRef = useRef<HTMLSpanElement>(null);
   const morphRef = useRef<Spring | null>(null);
-  const latest = useRef(items);
+  const latest = useRef({ items, open, setOpen });
+  const refocus = useRef(true);
   const mounted = phase !== "closed";
 
   useEffect(() => {
-    latest.current = items;
+    latest.current = { items, open, setOpen };
   });
+
+  useEffect(() => {
+    if (open) return setPhase("open");
+    setPhase((current) => (current === "closed" ? current : "leaving"));
+    // Focus left inside the menu would be lost as it unmounts.
+    if (refocus.current && cardRef.current?.contains(document.activeElement)) {
+      triggerRef.current?.focus({ preventScroll: true });
+    }
+    refocus.current = true;
+  }, [open]);
 
   useEffect(() => {
     if (phase === "open") morphRef.current?.set(1);
@@ -150,9 +180,11 @@ export function Menu({ items, "aria-label": label, icon = ellipsis, align = "end
     let current: HTMLButtonElement | null = null;
     let suppressClickUntil = 0;
 
+    // Asks to close. A controlled menu stays open until its owner agrees.
     const close = (restoreFocus = true) => {
-      setPhase("leaving");
-      if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
+      if (!latest.current.open) return;
+      refocus.current = restoreFocus;
+      latest.current.setOpen(false);
     };
 
     // The plate slides between rows for a drag and for a hovering mouse alike.
@@ -227,7 +259,7 @@ export function Menu({ items, "aria-label": label, icon = ellipsis, align = "end
     const click = (event: MouseEvent) => {
       const row = (event.target as Element).closest<HTMLButtonElement>(".lg-menu-item");
       if (!row || (event.detail !== 0 && performance.now() < suppressClickUntil)) return;
-      const item = latest.current[Number(row.dataset.index)];
+      const item = latest.current.items[Number(row.dataset.index)];
       if (!item || item === "separator") return;
       close();
       item.onSelect?.();
@@ -284,8 +316,6 @@ export function Menu({ items, "aria-label": label, icon = ellipsis, align = "end
     };
   }, [mounted]);
 
-  const open = phase === "open";
-
   return (
     <div className={cx("lg-menu", className)} style={style}>
       <Button
@@ -294,7 +324,7 @@ export function Menu({ items, "aria-label": label, icon = ellipsis, align = "end
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setPhase(open ? "leaving" : "open")}
+        onClick={() => setOpen(!open)}
       />
       {mounted ? (
         <div ref={cardRef} role="menu" aria-label={label} className="lg-menu-card" data-phase={phase} data-align={align}>
