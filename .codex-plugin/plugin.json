@@ -1,0 +1,38 @@
+{
+  "name": "glisse",
+  "version": "0.5.0",
+  "description": "Build Liquid Glass / iOS 26-style glass UI on the web with the glisse React components.",
+  "author": {
+    "name": "0kzh",
+    "url": "https://github.com/0kzh"
+  },
+  "homepage": "https://glisse.kelvinzhang.com",
+  "repository": "https://github.com/0kzh/glisse",
+  "license": "MIT",
+  "keywords": [
+    "react",
+    "liquid-glass",
+    "glass",
+    "ui",
+    "ios-26",
+    "coding-agents"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Glisse",
+    "shortDescription": "Liquid Glass React UI for the web",
+    "longDescription": "Teaches coding agents how to install and use glisse: faithful iOS 26 Liquid Glass components (Glass, Button, Switch, Slider, TabBar, SegmentedControl, Menu, Input, SearchField), refraction fallbacks, theming, and common pitfalls.",
+    "developerName": "0kzh",
+    "category": "Coding",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://glisse.kelvinzhang.com",
+    "defaultPrompt": [
+      "Add a glisse Switch and filled Button to this settings panel.",
+      "Build an iOS 26-style TabBar with glisse over a marked backdrop.",
+      "Create a Liquid Glass Menu and SegmentedControl with glisse."
+    ],
+    "brandColor": "#0088ff",
+    "composerIcon": "./assets/logo.png",
+    "logo": "./assets/logo.png"
+  }
+}

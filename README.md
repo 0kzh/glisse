@@ -29,6 +29,16 @@ function Settings() {
 
 See every component, with live examples and code, at [glisse.kelvinzhang.ca](https://glisse.kelvinzhang.ca).
 
+## Agent skill
+
+Works with any coding agent that reads `.agents` skills:
+
+```bash
+npx skills add 0kzh/glisse
+```
+
+Claude Code: `/plugin marketplace add 0kzh/glisse`, then `/plugin install glisse@glisse`. Codex: add `0kzh/glisse` as a plugin marketplace (`.agents/plugins/marketplace.json`).
+
 ## License
 
 MIT
