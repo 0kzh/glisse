@@ -75,6 +75,16 @@ export interface LensOptions {
   ink?: boolean;
   /** Softens what the rim bends, as iOS's tab bar lens does, by a Gaussian blur of this deviation in px. */
   blur?: number;
+  /**
+   * Bends as light does through a rounded bezel `depth` wide, at most
+   * `maxDepth` px: straight in from the rim, most at the very edge, by
+   * Snell's law over a squircle's slope
+   * (https://kube.io/blog/liquid-glass-css-svg/). The strength is then a
+   * share of the bezel's width, and `dome` and `splay` aren't used.
+   */
+  bezel?: boolean;
+  /** The most `depth` comes to, in px, when it's a share of the lens. */
+  maxDepth?: number;
 }
 
 /** The page ink lies on, which its fringes are made up for: see `graph`. */
@@ -138,6 +148,120 @@ const slope = (x: number, { radius, scale }: Arc) => {
   return (inside / Math.sqrt(radius * radius - inside * inside)) * scale;
 };
 
+// How far a rounded bezel bends, from 1 at its edge to 0 where it meets the
+// flat of the glass, `t` being how far in that is: a ray straight down
+// through a squircle's surface, bent by glass of index 1.5, lands further in
+// by the tangent of how far it turned, times the glass under it.
+const BEZEL = (() => {
+  const samples = new Float32Array(256);
+  let most = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const t = Math.max(0.004, i / (samples.length - 1));
+    const surface = (1 - (1 - t) ** 4) ** 0.25;
+    const incident = Math.atan((1 - t) ** 3 / surface ** 3);
+    const refracted = Math.asin(Math.sin(incident) / 1.5);
+    samples[i] = Math.tan(incident - refracted) * (0.6 + surface);
+    most = Math.max(most, samples[i]!);
+  }
+  return samples.map((sample) => sample / most);
+})();
+
+function bezel(t: number): number {
+  const at = clamp(t, 0, 1) * (BEZEL.length - 1);
+  const lower = Math.floor(at);
+  const a = BEZEL[lower]!;
+  return a + (BEZEL[Math.min(lower + 1, BEZEL.length - 1)]! - a) * (at - lower);
+}
+
+/** The width of the band that bends, in px. */
+export function depthOf({ width, height }: Shape, options: LensOptions): number {
+  const depth = options.depth * (options.relative ? Math.min(width, height) : 1);
+  return options.maxDepth === undefined ? depth : Math.min(depth, options.maxDepth);
+}
+
+/** How a lens pulls at a point: where to (each from -1 to 1), and how much of that, from 0 to 1. */
+interface Pull {
+  /** Distance outside the lens's edge; negative inside. */
+  edge: number;
+  x: number;
+  y: number;
+  amount: number;
+}
+
+// A lens's pull at each point from its centre. Outside the lens, `edge` is
+// all that's set.
+function puller(shape: Shape, options: LensOptions): (x: number, y: number, pull: Pull) => void {
+  const halfWidth = shape.width / 2;
+  const halfHeight = shape.height / 2;
+  const radius = clamp(shape.radius, 0, Math.min(halfWidth, halfHeight));
+  const depth = depthOf(shape, options);
+
+  if (options.bezel) {
+    // The way in from the rim, turned smoothly round each corner: that of a
+    // rim whose corners are at least as round as the bezel is wide.
+    const round = clamp(Math.max(radius, depth), 0, Math.min(halfWidth, halfHeight));
+    return (x, y, pull) => {
+      pull.edge = distance(x, y, halfWidth, halfHeight, radius);
+      pull.x = pull.y = pull.amount = 0;
+      if (pull.edge >= 0 || depth <= 0 || -pull.edge >= depth) return;
+      const qx = Math.abs(x) - halfWidth + round;
+      const qy = Math.abs(y) - halfHeight + round;
+      if (qx > 0 && qy > 0) {
+        const length = Math.hypot(qx, qy);
+        pull.x = (Math.sign(x) * qx) / length;
+        pull.y = (Math.sign(y) * qy) / length;
+      } else if (qx > qy) pull.x = Math.sign(x);
+      else pull.y = Math.sign(y);
+      pull.amount = bezel(-pull.edge / depth);
+    };
+  }
+
+  const dome = options.dome * (options.relative ? Math.min(shape.width, shape.height) : 1);
+  const { splay } = options;
+  const innerWidth = Math.max(0, halfWidth - depth);
+  const innerHeight = Math.max(0, halfHeight - depth);
+  const innerRadius = clamp(radius, 0, Math.min(innerWidth, innerHeight));
+  const ramp = depth > 0 ? 1 / (depth * Math.SQRT2) : 1e6;
+  const sag = Math.max(0.01, Math.min(dome, Math.min(halfWidth, halfHeight) - 1));
+  const across = dome > 0 ? arc(sag, halfWidth) : null;
+  const down = dome > 0 ? arc(sag, halfHeight) : null;
+  const reach = 0.5 * Math.min(halfWidth, halfHeight);
+
+  return (x, y, pull) => {
+    pull.edge = distance(x, y, halfWidth, halfHeight, radius);
+    pull.x = pull.y = pull.amount = 0;
+    if (pull.edge >= 0) return;
+    const ax = Math.abs(x);
+    const ay = Math.abs(y);
+    let dx = across ? Math.sign(x) * slope(ax, across) : clamp(x / halfWidth, -1, 1);
+    let dy = down ? Math.sign(y) * slope(ay, down) : clamp(y / halfHeight, -1, 1);
+
+    // Near the top and bottom the pull turns towards straight down and up,
+    // near the sides towards straight across, keeping its strength.
+    if (splay < 1 && reach > 0) {
+      const keepX = Math.max(0, 1 - (halfHeight - ay) / reach) * (1 - splay);
+      const keepY = Math.max(0, 1 - (halfWidth - ax) / reach) * (1 - splay);
+      if (keepX > 0.001 || keepY > 0.001) {
+        const before = Math.hypot(dx, dy);
+        dx *= 1 - keepX;
+        dy *= 1 - keepY;
+        const after = Math.hypot(dx, dy);
+        if (after > 0.001) {
+          dx *= before / after;
+          dy *= before / after;
+        }
+      }
+    }
+    pull.x = dx;
+    pull.y = dy;
+    pull.amount = 0.5 * (1 + erf(distance(x, y, innerWidth, innerHeight, innerRadius) * ramp));
+  };
+}
+
+// Fully in once the pull reaches about a twentieth of its strength, and
+// smoothed over the last pixel at the edge.
+const bends = ({ edge, amount }: Pull) => Math.min(1, amount * 20, -edge);
+
 /** A lens's map, sized in device pixels. */
 export interface LensMap {
   columns: number;
@@ -155,17 +279,17 @@ export interface LensMap {
 /**
  * Draws a lens's map, after Aave's: within a band about `depth` wide around
  * the rim, each point shows content from further in, by the slope of a
- * shallow dome there, and the rest is left as it is. The light is a glow
- * along the light's axis and a thin lit edge. Its alpha fades out where the
- * bend does, so the middle shows the content exactly: a displacement map
- * can't hold "none" exactly in a byte, and WebKit, which stretches the map
- * across a long box, would otherwise shift the middle by a pixel.
+ * shallow dome there (or as a bezel bends, see `LensOptions.bezel`), and the
+ * rest is left as it is. The light is a glow along the light's axis and a
+ * thin lit edge. Its alpha fades out where the bend does, so the middle
+ * shows the content exactly: a displacement map can't hold "none" exactly in
+ * a byte, and WebKit, which stretches the map across a long box, would
+ * otherwise shift the middle by a pixel.
  */
 export function lensMap(shape: Shape, options: LensOptions, light: Light, density: number): LensMap {
   const { width, height } = shape;
   const halfWidth = width / 2;
   const halfHeight = height / 2;
-  const radius = clamp(shape.radius, 0, Math.min(halfWidth, halfHeight));
   const columns = Math.max(1, Math.round(width * density));
   const rows = Math.max(1, Math.round(height * density));
   const pullAcross = new Uint8ClampedArray(columns * rows * 4);
@@ -177,18 +301,8 @@ export function lensMap(shape: Shape, options: LensOptions, light: Light, densit
     data[i + 3] = alpha;
   };
 
-  const share = options.relative ? Math.min(width, height) : 1;
-  const depth = options.depth * share;
-  const dome = options.dome * share;
-  const { splay } = options;
-  const innerWidth = Math.max(0, halfWidth - depth);
-  const innerHeight = Math.max(0, halfHeight - depth);
-  const innerRadius = clamp(radius, 0, Math.min(innerWidth, innerHeight));
-  const ramp = depth > 0 ? 1 / (depth * Math.SQRT2) : 1e6;
-  const sag = Math.max(0.01, Math.min(dome, Math.min(halfWidth, halfHeight) - 1));
-  const across = dome > 0 ? arc(sag, halfWidth) : null;
-  const down = dome > 0 ? arc(sag, halfHeight) : null;
-  const reach = 0.5 * Math.min(halfWidth, halfHeight);
+  const pullAt = puller(shape, options);
+  const pull: Pull = { edge: 0, x: 0, y: 0, amount: 0 };
   const cos = Math.cos((light.angle * Math.PI) / 180);
   const sin = Math.sin((light.angle * Math.PI) / 180);
   const glowStart = (1 - light.spread) * Math.SQRT2;
@@ -199,56 +313,59 @@ export function lensMap(shape: Shape, options: LensOptions, light: Light, densit
       const i = (row * columns + column) * 4;
       const x = ((column + 0.5) / columns) * width - halfWidth;
       const y = ((row + 0.5) / rows) * height - halfHeight;
-      const edge = distance(x, y, halfWidth, halfHeight, radius);
+      pullAt(x, y, pull);
+      const { edge, amount: falloff } = pull;
       // Smoothed over the last pixel at the edge.
       const inside = Math.round(255 * clamp(-edge, 0, 1));
-      grey(shapeMask, i, 0, inside);
       if (edge >= 0) {
+        grey(shapeMask, i, 0, inside);
         grey(pullAcross, i, 128);
         grey(pullDown, i, 128);
         grey(caught, i, 128, 0);
         continue;
       }
 
-      const ax = Math.abs(x);
-      const ay = Math.abs(y);
-      let dx = across ? Math.sign(x) * slope(ax, across) : clamp(x / halfWidth, -1, 1);
-      let dy = down ? Math.sign(y) * slope(ay, down) : clamp(y / halfHeight, -1, 1);
-
-      // Near the top and bottom the pull turns towards straight down and up,
-      // near the sides towards straight across, keeping its strength.
-      if (splay < 1 && reach > 0) {
-        const keepX = Math.max(0, 1 - (halfHeight - ay) / reach) * (1 - splay);
-        const keepY = Math.max(0, 1 - (halfWidth - ax) / reach) * (1 - splay);
-        if (keepX > 0.001 || keepY > 0.001) {
-          const before = Math.hypot(dx, dy);
-          dx *= 1 - keepX;
-          dy *= 1 - keepY;
-          const after = Math.hypot(dx, dy);
-          if (after > 0.001) {
-            dx *= before / after;
-            dy *= before / after;
-          }
-        }
-      }
-
-      const falloff = 0.5 * (1 + erf(distance(x, y, innerWidth, innerHeight, innerRadius) * ramp));
       grey(shapeMask, i, Math.round(255 * falloff), inside);
-      grey(pullAcross, i, Math.round((0.5 - 0.5 * dx * falloff) * 255));
-      grey(pullDown, i, Math.round((0.5 - 0.5 * dy * falloff) * 255));
+      grey(pullAcross, i, Math.round((0.5 - 0.5 * pull.x * falloff) * 255));
+      grey(pullDown, i, Math.round((0.5 - 0.5 * pull.y * falloff) * 255));
 
       const facing = Math.abs(clamp(x / halfWidth, -1, 1) * cos + clamp(y / halfHeight, -1, 1) * sin);
       const glow =
         glowRange > 0.001 ? light.glow * clamp((facing - glowStart) / glowRange, 0, 1) ** light.glowPower * falloff : 0;
       const rim = light.edge * Math.max(0, 1 + edge / light.edgeWidth) * facing ** light.edgePower;
       const amount = Math.min(1, glow + rim);
-      // Fully in once the pull reaches about a twentieth of its strength, and
-      // smoothed over the last pixel at the edge.
-      const bends = Math.min(1, falloff * 20, -edge);
-      grey(caught, i, Math.round(127 * amount + 128), Math.round(255 * bends));
+      grey(caught, i, Math.round(127 * amount + 128), Math.round(255 * bends(pull)));
     }
   }
   return { columns, rows, across: pullAcross, down: pullDown, light: caught, shape: shapeMask };
+}
+
+/**
+ * A lens's pull as numbers, for drawing the lens rather than filtering with
+ * it (see drawn.ts): four to each device pixel, the pull across and down
+ * (each from -1 to 1, as the map's greys are from 0 to 255), how far the
+ * lens bends there at all, and how far inside the lens's shape it is, both
+ * from 0 to 1 as the map's alphas are.
+ */
+export function lensField(shape: Shape, options: LensOptions, density: number): { columns: number; rows: number; data: Float32Array } {
+  const { width, height } = shape;
+  const columns = Math.max(1, Math.round(width * density));
+  const rows = Math.max(1, Math.round(height * density));
+  const data = new Float32Array(columns * rows * 4);
+  const pullAt = puller(shape, options);
+  const pull: Pull = { edge: 0, x: 0, y: 0, amount: 0 };
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      pullAt(((column + 0.5) / columns) * width - width / 2, ((row + 0.5) / rows) * height - height / 2, pull);
+      if (pull.edge >= 0) continue;
+      const i = (row * columns + column) * 4;
+      data[i] = pull.x * pull.amount;
+      data[i + 1] = pull.y * pull.amount;
+      data[i + 2] = Math.max(0, bends(pull));
+      data[i + 3] = clamp(-pull.edge, 0, 1);
+    }
+  }
+  return { columns, rows, data };
 }
 
 /** PNG data URLs of a lens's map. */
@@ -287,7 +404,7 @@ function encode(key: string, draw: () => LensMap): Encoded | null {
 }
 
 /** WebKit needs filters in bounding-box units. */
-const boxUnits = (): boolean =>
+export const boxUnits = (): boolean =>
   /AppleWebKit\//.test(navigator.userAgent) && !/Chrom(?:e|ium)\//.test(navigator.userAgent);
 
 const CHANNELS = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0"];
@@ -546,7 +663,8 @@ interface Fit {
   shine: number;
   ink?: Ink;
   blur: number;
-  strength: number;
+  /** How far the rim reaches, in px, for the glass at its own size. */
+  reach: number;
   dispersion: number;
   width: number;
   height: number;
@@ -566,21 +684,32 @@ export function shapeOf(glass: HTMLElement, style: CSSStyleDeclaration = getComp
   return { width, height, radius };
 }
 
-// Draws the map for the glass's size, shape and light, or takes it from the
-// cache, along with the strength, dispersion and shine read off the glass.
-function fit(glass: HTMLElement, options: LensOptions): Fit | null {
-  const style = getComputedStyle(glass);
-  const shape = shapeOf(glass, style);
-  if (!shape) return null;
-  const { width, height, radius } = shape;
+/** What a lens reads off its glass: how far it reaches, in px, and how far its colours split. */
+export function tuning(
+  style: CSSStyleDeclaration,
+  shape: Shape,
+  options: LensOptions,
+): { reach: number; dispersion: number; page: number } {
   // The page's shine is negative on a light page, where the rim darkens.
   const page = parseFloat(style.getPropertyValue("--lg-lens-shine")) || 0;
-  const shine = options.paintsLight ? 0 : options.shine === undefined ? page : Math.sign(page) * options.shine;
   const tuned = options.strengthProperty ? parseFloat(style.getPropertyValue(options.strengthProperty)) : NaN;
   const own = page > 0 ? (options.darkStrength ?? options.strength) : options.strength;
   const strength = Number.isFinite(tuned) ? tuned : own;
   const split = options.dispersionProperty ? parseFloat(style.getPropertyValue(options.dispersionProperty)) : NaN;
   const dispersion = Number.isFinite(split) ? Math.max(0, split) : options.dispersion;
+  const reach = strength * (options.bezel ? depthOf(shape, options) : Math.min(shape.width, shape.height));
+  return { reach, dispersion, page };
+}
+
+// Draws the map for the glass's size, shape and light, or takes it from the
+// cache, along with the reach, dispersion and shine read off the glass.
+function fit(glass: HTMLElement, options: LensOptions): Fit | null {
+  const style = getComputedStyle(glass);
+  const shape = shapeOf(glass, style);
+  if (!shape) return null;
+  const { width, height, radius } = shape;
+  const { reach, dispersion, page } = tuning(style, shape, options);
+  const shine = options.paintsLight ? 0 : options.shine === undefined ? page : Math.sign(page) * options.shine;
   const density = Math.min(devicePixelRatio || 1, 2);
   // Glass that paints its own light uses only where the map bends, which is
   // the same on any page.
@@ -591,7 +720,7 @@ function fit(glass: HTMLElement, options: LensOptions): Fit | null {
   const blur = options.blur ?? 0;
   // The page's shine is negative on a light page.
   const ink: Ink | undefined = options.ink ? (page < 0 ? "light" : "dark") : undefined;
-  return maps ? { maps, key: `${key}|${shine}|${ink}`, shine, ink, blur, strength, dispersion, width, height } : null;
+  return maps ? { maps, key: `${key}|${shine}|${ink}`, shine, ink, blur, reach, dispersion, width, height } : null;
 }
 
 /** Glass that moves over content of its own. */
@@ -654,7 +783,8 @@ function render(surface: Surface): void {
       if (!member.fit || !at.width || !at.height) continue;
       const width = at.width / unit;
       const height = at.height / unit;
-      const reach = member.fit.strength * Math.min(width, height) * member.amount;
+      // The glass may be scaled, as when it lifts: its reach is with it.
+      const reach = member.fit.reach * (Math.min(width, height) / Math.min(member.fit.width, member.fit.height)) * member.amount;
       const { dispersion } = member.fit;
       const blur = member.fit.blur * member.amount;
       member.placed = { x: (at.left - from.left) / unit, y: (at.top - from.top) / unit, width, height, reach, dispersion, blur };
@@ -819,8 +949,8 @@ export function createBackdropLens(glass: HTMLElement, options: LensOptions): Ba
   let version = 0;
   const draw = () => {
     if (!fitted || !built) return;
-    const { width, height, strength, dispersion, blur } = fitted;
-    const reach = strength * Math.min(width, height) * amount;
+    const { width, height, dispersion, blur } = fitted;
+    const reach = fitted.reach * amount;
     place(built, [{ x: 0, y: 0, width, height, reach, dispersion, blur: blur * amount }], width, height, false);
     built.filter.id = `${name}-${++version}`;
     glass.style.setProperty("--lg-filter", `url("#${built.filter.id}")`);
@@ -862,8 +992,7 @@ const backdrops = new Map<string, string>();
 export function fitBackdropLens(glass: HTMLElement, options: LensOptions): void {
   const fitted = fit(glass, options);
   if (!fitted) return;
-  const { maps, key, shine, strength, dispersion, width, height } = fitted;
-  const reach = strength * Math.min(width, height);
+  const { maps, key, shine, reach, dispersion, width, height } = fitted;
   const id = `${key}|${reach}|${dispersion}`;
   let name = backdrops.get(id);
   if (!name) {

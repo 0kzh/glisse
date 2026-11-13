@@ -47,6 +47,8 @@ beforeEach(() => {
   vi.stubGlobal("cancelIdleCallback", () => {});
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
   vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  // This canvas has no WebGL, so Safari filters the content here, as it does
+  // wherever it has no WebGL 2. Its drawn lens is in drawn.test.tsx.
   const context = {
     createImageData: (width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }),
     putImageData() {},
@@ -106,7 +108,7 @@ test.each([
   expect(screen.getByText("On top")).toBeTruthy();
 });
 
-test("bends each glass by its own size, a reach of 0.45 of its shorter side", () => {
+test("bends each glass by its own size, reaching in twice the width of its bezel", () => {
   browse(CHROME);
   boxes = { wide: new DOMRect(20, 20, 200, 100), small: new DOMRect(250, 200, 80, 40) };
   render(
@@ -120,8 +122,9 @@ test("bends each glass by its own size, a reach of 0.45 of its shorter side", ()
   const scale = (lens: number) =>
     Number(filter.querySelector(`feDisplacementMap[in2="across-pull-${lens}"]`)!.getAttribute("scale"));
   // Red bends a little further than blue.
-  expect(scale(0)).toBeCloseTo(0.45 * 100 * 1.08);
-  expect(scale(1)).toBeCloseTo(0.45 * 40 * 1.08);
+  // The bezel is three tenths of the shorter side.
+  expect(scale(0)).toBeCloseTo(2 * 30 * 1.12);
+  expect(scale(1)).toBeCloseTo(2 * 12 * 1.12);
   const image = filter.querySelector('feImage[result="across-1"]')!;
   expect([image.getAttribute("x"), image.getAttribute("y"), image.getAttribute("width")]).toEqual(["250", "200", "80"]);
 });
@@ -197,7 +200,7 @@ test("with nothing marked, Chromium bends the live backdrop with the same lens",
   const id = /^url\("#([^"]+)"\) saturate\(1\.5\)$/.exec(glass.style.getPropertyValue("--lg-filter"))?.[1];
   const filter = document.getElementById(id!)!;
   expect(filter.querySelectorAll("feDisplacementMap")).toHaveLength(6);
-  expect(filter.querySelector("feDisplacementMap")!.getAttribute("scale")).toBe(String(0.45 * 100 * 1.08));
+  expect(filter.querySelector("feDisplacementMap")!.getAttribute("scale")).toBe(String(2 * 30 * 1.12));
   expect(glass.style.getPropertyValue("--lg-rim")).toMatch(/^url\("data:image\/png/);
 });
 
@@ -260,13 +263,13 @@ test("takes new settings on its next render, with no resize", () => {
     [...filterOf(marked())!.querySelectorAll('feDisplacementMap[in2="across-pull-0"]')].map((pass) =>
       Number(pass.getAttribute("scale")),
     );
-  expect(scales()[0]).toBeCloseTo(0.45 * 100 * 1.08);
-  expect(scales()[2]).toBeCloseTo(0.45 * 100);
+  expect(scales()[0]).toBeCloseTo(0.45 * 30 * 1.08);
+  expect(scales()[2]).toBeCloseTo(0.45 * 30);
   const painted = vi.mocked(HTMLCanvasElement.prototype.toDataURL).mock.calls.length;
 
   rerender(scene(0.2, 1.5, 0.27));
-  expect(scales()[0]).toBeCloseTo(0.2 * 100 * 1.3);
-  expect(scales()[2]).toBeCloseTo(0.2 * 100);
+  expect(scales()[0]).toBeCloseTo(0.2 * 30 * 1.3);
+  expect(scales()[2]).toBeCloseTo(0.2 * 30);
   // The rim, drawn again for its new strength.
   expect(vi.mocked(HTMLCanvasElement.prototype.toDataURL).mock.calls.length).toBe(painted + 1);
 

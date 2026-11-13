@@ -108,6 +108,36 @@
   box-shadow: 0 1px 3px var(--lg-drop);
 }
 
+/* Glass that draws its own bent rim (see drawn.ts) keeps the drawing under
+   everything else it holds, and its lit rim over the drawing. */
+.lg-glass[data-drawn] {
+  isolation: isolate;
+}
+
+.lg-drawn {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.lg-drawn > canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lg-drawn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--lg-rim, none) 0 0 / 100% 100%;
+}
+
 .lg-glass::after {
   content: "";
   position: absolute;

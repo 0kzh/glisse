@@ -1,25 +1,27 @@
 import { useEffect, useRef, type RefObject } from "react";
 
 import { createLens, distance, fitBackdropLens, shapeOf, type Lens, type LensOptions, type Shape } from "./lens";
+import { createDrawnLens, drawsLens } from "./drawn";
 import { container, svg } from "./svg";
 
-// Glass bends what's behind it with the same lens as the switch, slider and
-// tab bar (see lens.ts), shaped as Aave's free-moving lens, the first demo in
-// its article, and scaled to the glass: a rim band a quarter of its shorter
-// side wide, a dome that sags the whole half of it, and a reach of 0.45 of
-// it, Aave's 72px on its 160px lens. --lg-glass-bend overrides the strength,
-// and --lg-glass-dispersion how far its colours split (0.4: red bends 8%
-// further than blue). The light on its rim the glass paints over its own
-// frost, as iOS does (below).
+// Glass bends what's behind it as light does through a rounded bezel (see
+// lens.ts): straight in from its rim, most at the very edge, through a band
+// three tenths of its shorter side wide, 36px at most, reaching as far in
+// again as the band is wide. --lg-glass-bend overrides that reach, as a share
+// of the band's width, and --lg-glass-dispersion how far its colours split
+// (0.6: red bends 12% further than blue). The light on its rim the glass
+// paints over its own frost, as iOS does (below).
 export const GLASS: LensOptions = {
-  strength: 0.45,
+  strength: 2,
   strengthProperty: "--lg-glass-bend",
-  dispersion: 0.4,
+  dispersion: 0.6,
   dispersionProperty: "--lg-glass-dispersion",
-  depth: 0.25,
-  dome: 0.5,
+  depth: 0.3,
+  maxDepth: 36,
+  dome: 0,
   splay: 1,
   relative: true,
+  bezel: true,
   paintsLight: true,
 };
 
@@ -254,9 +256,12 @@ function follow(): void {
 
 // Makes the glass a lens over the marked content behind it, as a thumb is
 // over its track: the content is filtered with the glass's map placed where
-// the glass stands, and the glass frosts it as usual.
+// the glass stands, and the glass frosts it as usual. WebKit, which filters
+// too slowly for a lens to move, has the glass draw its own bent rim instead
+// (see drawn.ts), which follows the glass by itself.
 function bend(element: HTMLElement, source: HTMLElement): Fitting {
-  const lens = createLens(element, source, GLASS);
+  const draws = drawsLens();
+  const lens = draws ? createDrawnLens(element, source, GLASS) : createLens(element, source, GLASS);
   let started = false;
   const fitting = refitting(
     element,
@@ -265,6 +270,7 @@ function bend(element: HTMLElement, source: HTMLElement): Fitting {
       if (started) return lens.refit();
       started = true;
       lens.setActive(true);
+      if (draws) return;
       let lenses = followed.get(source);
       if (!lenses) followed.set(source, (lenses = new Set()));
       lenses.add(lens);
@@ -286,8 +292,8 @@ function bend(element: HTMLElement, source: HTMLElement): Fitting {
 
 /**
  * Bends what's behind the element. Content marked `data-glisse-backdrop`
- * behind it is filtered, in every browser, with the glass's lens placed
- * where the glass stands. Over anything else, Chromium filters the live
+ * behind it is bent in every browser: filtered with the glass's lens placed
+ * where the glass stands, or in WebKit drawn bent by the glass. Over anything else, Chromium filters the live
  * backdrop with the same lens, and other browsers keep the frost and the lit
  * rim. `selection` is the tab bar's lifted lens, whose own bend is below;
  * with `bendsBackdrop` false it only takes its rims, and bends its backdrop

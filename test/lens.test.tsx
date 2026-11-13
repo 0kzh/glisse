@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { Slider, Switch, TabBar } from "../src";
-import { createLens, lensMap } from "../src/internal/lens";
+import { createLens, lensField, lensMap } from "../src/internal/lens";
 
 const light = { angle: 45, glow: 0.4, spread: 0.5, glowPower: 1.5, edge: 0.5, edgeWidth: 2, edgePower: 1.5 };
 const options = { strength: 0.44, dispersion: 1, depth: 2, dome: 6, splay: 0.4 };
@@ -57,6 +57,43 @@ test("glass's band and dome scale with its size", () => {
   };
   // The band is the same share of a small panel as of a large one.
   expect(bends(40)).toBeCloseTo(bends(160), 1);
+});
+
+test("a bezel pulls straight in from the rim, most at the edge, and not at all past its width", () => {
+  const glass = { strength: 2, dispersion: 0.6, depth: 0.3, maxDepth: 36, dome: 0, splay: 1, relative: true, bezel: true };
+  // 200 by 100: the bezel is 30px wide.
+  const shape = { width: 200, height: 100, radius: 20 };
+  const map = lensMap(shape, glass, light, 1);
+  const grey = (data: Uint8ClampedArray, x: number, y: number) => data[(y * map.columns + x) * 4]!;
+  // Along the top, at the middle: down only, less the further in, and none 30px in.
+  expect(grey(map.across, 100, 1)).toBe(128);
+  expect(grey(map.down, 100, 1)).toBeGreaterThan(200);
+  expect(grey(map.down, 100, 10)).toBeLessThan(grey(map.down, 100, 1));
+  expect(grey(map.down, 100, 10)).toBeGreaterThan(128);
+  expect(grey(map.down, 100, 31)).toBe(128);
+  // At the left side, across only, and from the left.
+  expect(grey(map.down, 1, 50)).toBe(128);
+  expect(grey(map.across, 1, 50)).toBeGreaterThan(200);
+  // Round a corner sharper than the bezel is wide, the pull turns smoothly:
+  // no two neighbours across the corner's diagonal differ by much.
+  for (let i = 3; i < 28; i++) {
+    expect(Math.abs(grey(map.across, i + 1, i) - grey(map.across, i, i + 1))).toBeLessThan(40);
+  }
+
+  // A large panel's bezel stops at 36px.
+  const large = lensMap({ width: 400, height: 300, radius: 40 }, glass, light, 1);
+  expect(large.down[(20 * 400 + 200) * 4]).toBeGreaterThan(128);
+  expect(large.down[(37 * 400 + 200) * 4]).toBe(128);
+
+  // The same pull as numbers, for a lens that's drawn.
+  const field = lensField(shape, glass, 1);
+  const at = (x: number, y: number) => [...field.data.slice((y * field.columns + x) * 4, (y * field.columns + x) * 4 + 4)];
+  const [across, down, bends, inside] = at(100, 1);
+  expect(across).toBe(0);
+  expect(down).toBeCloseTo((128 - grey(map.down, 100, 1)) / 127.5, 1);
+  expect(bends).toBe(1);
+  expect(inside).toBe(1);
+  expect(at(100, 50)).toEqual([0, 0, 0, 1]);
 });
 
 const browse = (userAgent: string) => vi.spyOn(navigator, "userAgent", "get").mockReturnValue(userAgent);
