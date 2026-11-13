@@ -1,0 +1,27 @@
+{
+  "name": "glisse",
+  "description": "Agent skills marketplace for glisse — Liquid Glass / iOS 26-style glass UI for the web.",
+  "owner": {
+    "name": "0kzh",
+    "url": "https://github.com/0kzh"
+  },
+  "plugins": [
+    {
+      "name": "glisse",
+      "source": "./",
+      "description": "Build Liquid Glass / iOS 26-style glass UI on the web with the glisse React components.",
+      "homepage": "https://github.com/0kzh/glisse",
+      "repository": "https://github.com/0kzh/glisse",
+      "license": "MIT",
+      "category": "development",
+      "keywords": [
+        "react",
+        "liquid-glass",
+        "glass",
+        "ui",
+        "ios-26",
+        "coding-agents"
+      ]
+    }
+  ]
+}
